@@ -1,0 +1,37 @@
+[project]
+name = "labthings-picamera2"
+version = "0.0.0"
+authors = [
+  { name="Richard Bowman", email="richard.bowman@cantab.net" },
+]
+description = "Picamera2 support for LabThings-FastAPI"
+readme = "README.md"
+requires-python = ">=3.9"
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "License :: OSI Approved :: MIT License",
+  "Operating System :: OS Independent",
+]
+dependencies = [
+  "picamera2",
+  "labthings-fastapi",
+]
+
+[project.optional-dependencies]
+dev = [
+  "labthings-fastapi[dev]"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/rwb27/labthings-picamera2"
+"Bug Tracker" = "https://github.com/rwb27/labthings-picamera2/issues"
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[tool.ruff]
+target-version = "py39"
+
+[tool.mypy]
+plugins = ["pydantic.mypy"]
