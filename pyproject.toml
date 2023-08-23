@@ -15,6 +15,7 @@ classifiers = [
 dependencies = [
   "picamera2",
   "labthings-fastapi",
+  "numpy",
 ]
 
 [project.optional-dependencies]
