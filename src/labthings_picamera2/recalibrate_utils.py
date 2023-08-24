@@ -381,8 +381,8 @@ def lst_from_channels(
     # What we actually want to calculate is the gains needed to compensate for the
     # lens shading - that's 1/lens_shading_table_float as we currently have it.
     g: np.ndarray = np.mean(lens_shading[1:3, ...], axis=0)
-    r: np.ndarray = lens_shading[0, ...]
-    b: np.ndarray = lens_shading[3, ...]
+    r: np.ndarray = lens_shading[3, ...]
+    b: np.ndarray = lens_shading[0, ...]
     luminance_gains: np.ndarray = 1/g
     cr_gains: np.ndarray = g/r
     cb_gains: np.ndarray = g/b
@@ -413,19 +413,23 @@ def set_static_lst(
     alsc["luminance_lut"] = np.reshape(luminance, (-1)).round(3).tolist()
 
 
+def index_of_algorithm(algorithms: list[dict], algorithm: str):
+    """Find the index of an algorithm's section in the tuning file"""
+    for i, a in enumerate(algorithms):
+        if algorithm in a:
+            return i
+
+
 def copy_alsc_section(from_tuning: dict, to_tuning: dict):
     """Copy the `rpi.alsc` algorithm from one tuning to another.
     
     This is done in-place, i.e. modifying to_tuning.
     """
-    from_alsc = Picamera2.find_tuning_algo(from_tuning, "rpi.alsc")
-    to_alsc = Picamera2.find_tuning_algo(to_tuning, "rpi.alsc")
+    from_i = index_of_algorithm(from_tuning["algorithms"], "rpi.alsc")
+    to_i = index_of_algorithm(to_tuning["algorithms"], "rpi.alsc")
     # Please excuse the clumsy update-and-delete - this lets us use
     # the nice Picamera2 function to find the relevant sub-dict.
-    to_alsc.update(from_alsc)
-    for k in list(to_alsc.keys()):
-        if k not in from_alsc:
-            del to_alsc[k]
+    to_tuning["algorithms"][to_i] = from_tuning["algorithms"][from_i]
 
 
 def lst_from_camera(camera: Picamera2) -> LensShadingTables:

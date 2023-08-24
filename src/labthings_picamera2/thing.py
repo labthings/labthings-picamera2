@@ -380,8 +380,16 @@ class StreamingPiCamera2(Thing):
         the processed images. It should not affect raw images.
         """
         with self.picamera(pause_stream=True) as cam:
-            tables = recalibrate_utils.lst_from_camera(cam)
-            recalibrate_utils.set_static_lst(self.tuning, *tables)
+            L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
+            gain_r, gain_b = self.persistent_controls["ColourGains"]
+            print(f"Colour gains currently {gain_r}, {gain_b}")
+            gain_r *= np.min(Cr)
+            Cr /= np.min(Cr)
+            gain_b *= np.min(Cb)
+            Cb /= np.min(Cb)
+            self.persistent_controls["ColourGains"] = (gain_r, gain_b)
+            print(f"Colour gains now {gain_r}, {gain_b}")
+            recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
     @thing_action
@@ -393,8 +401,8 @@ class StreamingPiCamera2(Thing):
         table.
         """
         with self.picamera(pause_stream=True) as cam:
-            L, Cr, Cb = tuple(np.ones((12, 16)) for i in range(3))
-            recalibrate_utils.set_static_lst(self.tuning, L, Cr*0.2, Cb*3)
+            f = np.ones((12, 16))
+            recalibrate_utils.set_static_lst(self.tuning, f, f, f)
             self.initialise_picamera()
 
     @thing_action
