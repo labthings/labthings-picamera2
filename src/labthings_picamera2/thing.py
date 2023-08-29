@@ -7,7 +7,7 @@ from pydantic import BaseModel, BeforeValidator
 from labthings_fastapi.descriptors.property import PropertyDescriptor
 from labthings_fastapi.thing import Thing
 from labthings_fastapi.decorators import thing_action, thing_property
-from labthings_fastapi.file_manager import FileManager
+from labthings_fastapi.file_manager import FileManagerDep
 from typing import Annotated, Any, Iterator, Optional, Tuple
 from contextlib import contextmanager
 from anyio.from_thread import BlockingPortal
@@ -316,7 +316,7 @@ class StreamingPiCamera2(Thing):
             )  # Sprinkled a sleep to prevent camera getting confused by rapid commands
 
     @thing_action
-    def snap_image(self, file_manager: FileManager) -> str:
+    def snap_image(self, file_manager: FileManagerDep) -> str:
         """Acquire one image from the camera.
 
         This action cannot run if the camera is in use by a background thread, for
