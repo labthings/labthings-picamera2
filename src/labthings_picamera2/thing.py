@@ -134,10 +134,15 @@ class StreamingPiCamera2(Thing):
         description="Resolution to use for still images (by default)",
     )
     mjpeg_bitrate = PropertyDescriptor(
-        int, 
-        initial_value=0, 
-        description="Bitrate for MJPEG stream (best left at 0)"
+        Optional[int], 
+        initial_value=None, 
+        description="Bitrate for MJPEG stream (None for default)"
     )
+    @mjpeg_bitrate.setter
+    def mjpeg_bitrate(self, value: Optional[int]):
+        """Restart the stream when we set the bitrate"""
+        with self.picamera(pause_stream=True):
+            pass  # just pausing and restarting the stream is enough.
     stream_active = PropertyDescriptor(
         bool, 
         initial_value=False,
@@ -172,6 +177,22 @@ class StreamingPiCamera2(Thing):
 
     tuning = PropertyDescriptor(Optional[dict], None, readonly=True)
 
+    def settings_to_properties(self):
+        """Set the values of properties based on the settings dict"""
+        try:
+            props = self.thing_settings["properties"]
+        except KeyError:
+            return
+        for k, v in props.items():
+            settatr(self, k, v)
+
+    def properties_to_settings(self):
+        """Save certain properties to the settings dictionary"""
+        props = {}
+        for k in ["mjpeg_bitrate", "stream_resolution"]:
+            props[k] = getattr(self, k)
+        self.thing_settings["properties"] = props
+
     def initialise_tuning(self):
         """Read the tuning from the settings, or load default tuning
         
@@ -204,6 +225,7 @@ class StreamingPiCamera2(Thing):
         self.initialise_tuning()
         self.initialise_picamera()
         self.settings_to_persistent_controls()
+        self.settings_to_properties()
         self.start_streaming()
         return self
     
@@ -217,14 +239,15 @@ class StreamingPiCamera2(Thing):
         restarted: you may nened to call `update_persistent_controls()` to ensure
         your changes persist after the stream restarts.
         """
+        already_streaming = self.stream_active
         with self._picamera_lock:
-            if pause_stream:
+            if pause_stream and already_streaming:
                 self.update_persistent_controls()
                 self.stop_streaming(stop_web_stream=False)
             try:
                 yield self._picamera
             finally:
-                if pause_stream:
+                if pause_stream and already_streaming:
                     self.start_streaming()
 
     def populate_sensor_modes_and_default_tuning(self):
@@ -244,6 +267,7 @@ class StreamingPiCamera2(Thing):
         self.update_persistent_controls()
         self.thing_settings["persistent_controls"] = self.persistent_controls
         self.thing_settings["tuning"] = self.tuning
+        self.properties_to_settings()
         self.thing_settings.write_to_file() 
         # Shut down the camera
         self.stop_streaming()
@@ -275,7 +299,7 @@ class StreamingPiCamera2(Thing):
                 logging.info("Starting picamera MJPEG stream...")
                 picam.start_recording(
                     MJPEGEncoder(
-                        self.mjpeg_bitrate if self.mjpeg_bitrate > 0 else None,
+                        self.mjpeg_bitrate if self.mjpeg_bitrate > 0 else -1,
                     ),
                     PicameraStreamOutput(
                         self.mjpeg_stream, 
