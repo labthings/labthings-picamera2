@@ -13,7 +13,7 @@ classifiers = [
   "Operating System :: OS Independent",
 ]
 dependencies = [
-  "picamera2",
+  "picamera2~=0.3.12",
   "labthings-fastapi",
   "numpy",
 ]

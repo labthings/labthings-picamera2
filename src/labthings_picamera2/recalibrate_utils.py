@@ -53,7 +53,16 @@ def load_default_tuning(cam: Picamera2) -> dict:
     to test in the short term.
     """
     cp = cam.camera_properties
-    return cam.load_tuning_file(f"{cp['Model']}.json")
+    fname = f"{cp['Model']}.json"
+    try:
+        return cam.load_tuning_file(fname)
+    except RuntimeError:
+        dir="/usr/share/libcamera/ipa/raspberrypi"  # from picamera2 v0.3.9
+        # The directory above has been removed from the search path, which I
+        # find odd - as that's where the files currently are on a default
+        # Raspbian image. This may need updating if the files have moved
+        # in future updates to the system libcamera package
+        return cam.load_tuning_file(fname, dir=dir)
 
 
 def rgb_image(
