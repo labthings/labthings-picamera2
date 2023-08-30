@@ -184,7 +184,7 @@ class StreamingPiCamera2(Thing):
         except KeyError:
             return
         for k, v in props.items():
-            settatr(self, k, v)
+            setattr(self, k, v)
 
     def properties_to_settings(self):
         """Save certain properties to the settings dictionary"""
@@ -298,9 +298,7 @@ class StreamingPiCamera2(Thing):
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
                 picam.start_recording(
-                    MJPEGEncoder(
-                        self.mjpeg_bitrate if self.mjpeg_bitrate > 0 else -1,
-                    ),
+                    MJPEGEncoder(self.mjpeg_bitrate),
                     PicameraStreamOutput(
                         self.mjpeg_stream, 
                         get_blocking_portal(self),
