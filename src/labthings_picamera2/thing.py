@@ -151,6 +151,7 @@ class StreamingPiCamera2(Thing):
         readonly=True,
     )
     mjpeg_stream = MJPEGStreamDescriptor()
+    lores_mjpeg_stream = MJPEGStreamDescriptor()
     analogue_gain = PicameraControl(
         "AnalogueGain",
         float
@@ -288,12 +289,11 @@ class StreamingPiCamera2(Thing):
             try:
                 if picam.started:
                     picam.stop()
-                if picam.encoder is not None and picam.encoder.running:
-                    picam.encoder.stop()
+                    picam.stop_encoder()  # make sure there are no other encoders going
                 stream_config = picam.create_video_configuration(
                     main={"size": self.stream_resolution},
+                    lores={"size": (320, 240), "format": "YUV420"},
                     controls=self.persistent_controls,
-                    #colour_space=ColorSpace.Rec709(),
                 )
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
@@ -303,7 +303,14 @@ class StreamingPiCamera2(Thing):
                         self.mjpeg_stream, 
                         get_blocking_portal(self),
                     ),
-                    Quality.HIGH #TODO: use provided quality
+                )
+                picam.start_encoder(
+                    MJPEGEncoder(self.mjpeg_bitrate),
+                    PicameraStreamOutput(
+                        self.lores_mjpeg_stream,
+                        get_blocking_portal(self),
+                    ),
+                    name="lores",
                 )
             except Exception as e:
                 logging.info("Error while starting preview:")
@@ -320,7 +327,7 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera() as picam:
             try:
-                picam.stop_recording()
+                picam.stop_recording()  # This should also stop the extra lores encoder
             except Exception as e:
                 logging.info("Stopping recording failed")
                 logging.exception(e)
