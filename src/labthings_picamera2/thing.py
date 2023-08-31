@@ -1,14 +1,16 @@
 from __future__ import annotations
+from datetime import datetime
 import logging
+import os
 import time
 
-from pydantic import BaseModel, BeforeValidator
+from pydantic import BaseModel, BeforeValidator, RootModel
 
 from labthings_fastapi.descriptors.property import PropertyDescriptor
 from labthings_fastapi.thing import Thing
 from labthings_fastapi.decorators import thing_action, thing_property
 from labthings_fastapi.file_manager import FileManagerDep
-from typing import Annotated, Any, Iterator, Optional, Tuple
+from typing import Annotated, Any, Iterator, Literal, Optional, Tuple
 from contextlib import contextmanager
 from anyio.from_thread import BlockingPortal
 from threading import RLock
@@ -19,6 +21,7 @@ from picamera2.outputs import Output
 from picamera2 import controls
 from labthings_fastapi.outputs.mjpeg_stream import MJPEGStreamDescriptor, MJPEGStream
 from labthings_fastapi.utilities import get_blocking_portal
+from labthings_fastapi.types.numpy import NDArray
 import numpy as np
 from . import recalibrate_utils
 
@@ -65,6 +68,10 @@ class PicameraStreamOutput(Output):
     def outputframe(self, frame, _keyframe=True, _timestamp=None):
         """Add a frame to the stream's ringbuffer"""
         self.stream.add_frame(frame, self.portal)
+
+
+class ArrayModel(RootModel):
+    root: NDArray
 
 
 class SensorMode(BaseModel):
@@ -352,6 +359,33 @@ class StreamingPiCamera2(Thing):
         example if a preview stream is running.
         """
         raise NotImplementedError
+    
+    @thing_action
+    def capture_array(self, stream_name: Literal["main", "lores", "raw"]="main") -> ArrayModel:
+        """Acquire one image from the camera and return as an array"""
+        with self.picamera() as cam:
+            return cam.capture_array("main")
+        
+    @thing_action
+    def capture_temp_jpeg(
+        self,
+        file_manager: FileManagerDep,
+        stream_name: Literal["main", "lores", "raw"] = "main",
+    ) -> ArrayModel:
+        """Acquire one image from the camera and return as an array"""
+        fname = datetime.now().strftime("%Y-%m-%d-%H%M%S.jpeg")
+        path = file_manager.path(fname, rel="image")
+        with self.picamera() as cam:
+            cam.capture_file(path, name=stream_name, format="jpeg")
+
+    # @thing_action
+    # def capture_to_scan(
+    #     self,
+    #     scan_manager: ScanManager,
+    #     format: Literal["jpeg"] = "jpeg",
+    # ) -> None:
+    #     with scan_manager.new_jpeg() as output, self.picamera() as cam:
+    #         cam.capture_file(output, format="jpeg")
     
     @thing_property
     def exposure(self) -> float:
