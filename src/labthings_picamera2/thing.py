@@ -1,5 +1,6 @@
 from __future__ import annotations
 from datetime import datetime
+import json
 import logging
 import os
 import time
@@ -13,6 +14,7 @@ from labthings_fastapi.file_manager import FileManagerDep
 from typing import Annotated, Any, Iterator, Literal, Optional, Tuple
 from contextlib import contextmanager
 from anyio.from_thread import BlockingPortal
+import piexif
 from threading import RLock
 import picamera2
 from picamera2 import Picamera2
@@ -22,6 +24,7 @@ from picamera2 import controls
 from labthings_fastapi.outputs.mjpeg_stream import MJPEGStreamDescriptor, MJPEGStream
 from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
+from labthings_fastapi.dependencies.metadata import ThingStates
 import numpy as np
 from . import recalibrate_utils
 
@@ -370,6 +373,7 @@ class StreamingPiCamera2(Thing):
     def capture_temp_jpeg(
         self,
         file_manager: FileManagerDep,
+        thing_states_metadata: ThingStates,
         stream_name: Literal["main", "lores", "raw"] = "main",
     ) -> ArrayModel:
         """Acquire one image from the camera and return as an array"""
@@ -377,6 +381,12 @@ class StreamingPiCamera2(Thing):
         path = file_manager.path(fname, rel="image")
         with self.picamera() as cam:
             cam.capture_file(path, name=stream_name, format="jpeg")
+        # After the file is written, add metadata about the current Things
+        exif_dict = piexif.load(path)
+        exif_dict["Exif"][piexif.ExifIFD.UserComment] = json.dumps(
+            thing_states_metadata
+        ).encode("utf-8")
+        piexif.insert(piexif.dump(exif_dict), path)
 
     # @thing_action
     # def capture_to_scan(
