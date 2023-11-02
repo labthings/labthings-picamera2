@@ -466,6 +466,22 @@ class StreamingPiCamera2(Thing):
             self.initialise_picamera()
 
     @thing_action
+    def full_auto_calibrate(self):
+        """Perform a full auto-calibration
+        
+        This function will call the other calibration actions in sequence:
+        
+        * `flat_lens_shading` to disable flat-field
+        * `auto_expose_from_minimum`
+        * `calibrate_white_balance`
+        * `calibrate_lens_shading`
+        """
+        self.flat_lens_shading()
+        self.auto_expose_from_minimum()
+        self.calibrate_white_balance()
+        self.calibrate_lens_shading()
+
+    @thing_action
     def flat_lens_shading(self):
         """Disable flat-field correction
         
