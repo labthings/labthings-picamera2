@@ -4,29 +4,33 @@ import json
 import logging
 import os
 import time
+from tempfile import TemporaryDirectory
 
 from pydantic import BaseModel, BeforeValidator, RootModel
 
 from labthings_fastapi.descriptors.property import PropertyDescriptor
 from labthings_fastapi.thing import Thing
 from labthings_fastapi.decorators import thing_action, thing_property
-from labthings_fastapi.file_manager import FileManagerDep
-from typing import Annotated, Any, Iterator, Literal, Optional, Tuple
-from contextlib import contextmanager
-from anyio.from_thread import BlockingPortal
-import piexif
-from threading import RLock
-import picamera2
-from picamera2 import Picamera2
-from picamera2.encoders import MJPEGEncoder, Quality
-from picamera2.outputs import Output
-from picamera2 import controls
 from labthings_fastapi.outputs.mjpeg_stream import MJPEGStreamDescriptor, MJPEGStream
 from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
 from labthings_fastapi.dependencies.metadata import ThingStates
+from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
+from labthings_fastapi.outputs.blob import BlobOutput
+from typing import Annotated, Any, Iterator, Literal, Optional, Tuple
+from contextlib import contextmanager
+import piexif
+from threading import RLock
+import picamera2
+from picamera2 import Picamera2
+from picamera2.encoders import MJPEGEncoder
+from picamera2.outputs import Output
 import numpy as np
 from . import recalibrate_utils
+
+
+class JPEGBlob(BlobOutput):
+    media_type = "image/jpeg"
 
 
 class PicameraControl(PropertyDescriptor):
@@ -355,30 +359,30 @@ class StreamingPiCamera2(Thing):
             )  # Sprinkled a sleep to prevent camera getting confused by rapid commands
 
     @thing_action
-    def snap_image(self, file_manager: FileManagerDep) -> str:
+    def snap_image(self) -> ArrayModel:
         """Acquire one image from the camera.
 
         This action cannot run if the camera is in use by a background thread, for
         example if a preview stream is running.
         """
-        raise NotImplementedError
+        return self.capture_array()
     
     @thing_action
     def capture_array(self, stream_name: Literal["main", "lores", "raw"]="main") -> ArrayModel:
         """Acquire one image from the camera and return as an array"""
         with self.picamera() as cam:
-            return cam.capture_array("main")
+            return cam.capture_array(stream_name)
         
     @thing_action
-    def capture_temp_jpeg(
+    def capture_jpeg(
         self,
-        file_manager: FileManagerDep,
         thing_states_metadata: ThingStates,
         stream_name: Literal["main", "lores", "raw"] = "main",
-    ) -> ArrayModel:
+    ) -> JPEGBlob:
         """Acquire one image from the camera and return as an array"""
         fname = datetime.now().strftime("%Y-%m-%d-%H%M%S.jpeg")
-        path = file_manager.path(fname, rel="image")
+        folder = TemporaryDirectory()
+        path = os.path.join(folder.name, fname)
         with self.picamera() as cam:
             cam.capture_file(path, name=stream_name, format="jpeg")
         # After the file is written, add metadata about the current Things
@@ -387,6 +391,42 @@ class StreamingPiCamera2(Thing):
             thing_states_metadata
         ).encode("utf-8")
         piexif.insert(piexif.dump(exif_dict), path)
+        return JPEGBlob.from_temporary_directory(folder, fname)
+    
+    
+    @thing_action
+    def grab_jpeg(
+        self,
+        portal: BlockingPortal,
+        stream_name: Literal["main", "lores"] = "main",
+    ) -> JPEGBlob:
+        """Acquire one image from the preview stream and return as an array
+        
+        This differs from `capture_jpeg` in that it does not pause the MJPEG
+        preview stream. Instead, we simply return the next frame from that
+        stream (either "main" for the preview stream, or "lores" for the low
+        resolution preview). No metadata is returned.
+        """
+        stream = (
+            self.lores_mjpeg_stream if stream_name == "lores"
+            else self.mjpeg_stream
+        )
+        frame = portal.call(stream.grab_frame)
+        return JPEGBlob.from_bytes(frame)
+    
+    @thing_action
+    def grab_jpeg_size(
+        self,
+        portal: BlockingPortal,
+        stream_name: Literal["main", "lores"] = "main",
+    ) -> int:
+        """Acquire one image from the preview stream and return its size
+        """
+        stream = (
+            self.lores_mjpeg_stream if stream_name == "lores"
+            else self.mjpeg_stream
+        )
+        return portal.call(stream.next_frame_size)
 
     # @thing_action
     # def capture_to_scan(
