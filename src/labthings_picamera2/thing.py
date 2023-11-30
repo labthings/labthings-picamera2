@@ -548,3 +548,15 @@ class StreamingPiCamera2(Thing):
         with self.picamera(pause_stream=True):
             recalibrate_utils.copy_alsc_section(self.default_tuning, self.tuning)
             self.initialise_picamera()
+    
+    @thing_property
+    def lens_shading_is_static(self) -> bool:
+        """Whether the lens shading is static
+        
+        This property is true if the lens shading correction has been set to use
+        a static table (i.e. the number of automatic correction iterations is zero).
+        The default LST is not static, but all the calibration controls will set it
+        to be static (except "reset")
+        """
+        return recalibrate_utils.lst_is_static(self.tuning)
+

@@ -425,6 +425,12 @@ def set_static_lst(
     alsc["luminance_lut"] = np.reshape(luminance, (-1)).round(3).tolist()
 
 
+def lst_is_static(tuning: dict) -> bool:
+    """Whether the lens shading table is set to static"""
+    alsc = Picamera2.find_tuning_algo(tuning, "rpi.alsc")
+    return alsc["n_iter"] == 0
+
+
 def index_of_algorithm(algorithms: list[dict], algorithm: str):
     """Find the index of an algorithm's section in the tuning file"""
     for i, a in enumerate(algorithms):
