@@ -89,6 +89,12 @@ class SensorMode(BaseModel):
     format: Annotated[str, BeforeValidator(repr)]
 
 
+class LensShading(BaseModel):
+    luminance: list[list[float]]
+    Cr: list[list[float]]
+    Cb: list[list[float]]
+
+
 class StreamingPiCamera2(Thing):
     """A Thing that represents an OpenCV camera"""
 
@@ -141,11 +147,6 @@ class StreamingPiCamera2(Thing):
         initial_value=(1640, 1232),
         description="Resolution to use for the MJPEG stream",
     )
-    image_resolution = PropertyDescriptor(
-        tuple[int, int],
-        initial_value=(3280, 2464),
-        description="Resolution to use for still images (by default)",
-    )
     mjpeg_bitrate = PropertyDescriptor(
         Optional[int],
         initial_value=None,
@@ -180,6 +181,12 @@ class StreamingPiCamera2(Thing):
         "ExposureTime", int, description="The exposure time in microseconds"
     )
     sensor_modes = PropertyDescriptor(list[SensorMode], readonly=True)
+    
+    @thing_property
+    def sensor_resolution(self) -> tuple[int, int]:
+        """The native resolution of the camera's sensor"""
+        with self.picamera() as cam:
+            return cam.sensor_resolution
 
     tuning = PropertyDescriptor(Optional[dict], None, readonly=True)
 
@@ -218,6 +225,7 @@ class StreamingPiCamera2(Thing):
             # Don't close the camera if it's in use
             self._picamera_lock.acquire()
         if hasattr(self, "_picamera") and self._picamera:
+            print("Closing picamera object for reinitialisation")
             logging.info("Camera object already exists, closing for reinitialisation")
             self._picamera.close()
         self._picamera = picamera2.Picamera2(
@@ -340,7 +348,7 @@ class StreamingPiCamera2(Thing):
                 if stop_web_stream:
                     self.mjpeg_stream.stop()
                 logging.info(
-                    f"Stopped MJPEG stream. Switching to {self.image_resolution}."
+                    f"Stopped MJPEG stream."
                 )
 
             # Increase the resolution for taking an image
@@ -571,13 +579,40 @@ class StreamingPiCamera2(Thing):
             recalibrate_utils.set_static_lst(self.tuning, f, f, f)
             self.initialise_picamera()
 
+    @thing_property
+    def lens_shading_tables(self) -> Optional[LensShading]:
+        """The current lens shading (i.e. flat-field correction)
+        
+        This returns the current lens shading correction, as three 2D lists
+        each with dimensions 16x12. This assumes that we are using a static
+        lens shading table - if adaptive control is enabled, or if there
+        are multiple LSTs in use for different colour temperatures,
+        we return a null value to avoid confusion.
+        """
+        if not self.lens_shading_is_static:
+            return None
+        alsc = Picamera2.find_tuning_algo(self.tuning, "rpi.alsc")
+        if any(len(alsc[f"calibrations_C{c}"]) != 1 for c in ("r", "b")):
+            return None
+        
+        def reshape_lst(lin: list[float]) -> list[list[float]]:
+            w, h = 16, 12
+            return [lin[w*i:w*(i+1)] for i in range(h)]
+
+        return LensShading(
+            luminance=reshape_lst(alsc["luminance_lut"]),
+            Cr=reshape_lst(alsc["calibrations_Cr"][0]["table"]),
+            Cb=reshape_lst(alsc["calibrations_Cb"][0]["table"]),
+        )
+
+
     @thing_action
     def flat_lens_shading_chrominance(self):
         """Disable flat-field correction
 
-        This method will set a completely flat lens shading table. It is not the
-        same as the default behaviour, which is to use an adaptive lens shading
-        table.
+        This method will set the chrominance of the lens shading table to be
+        flat, i.e. we'll correct vignetting of intensity, but not any change in
+        colour across the image.
         """
         with self.picamera(pause_stream=True):
             alsc = Picamera2.find_tuning_algo(self.tuning, "rpi.alsc")
