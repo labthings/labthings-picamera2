@@ -17,7 +17,7 @@ from labthings_fastapi.types.numpy import NDArray
 from labthings_fastapi.dependencies.metadata import ThingStates
 from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
 from labthings_fastapi.outputs.blob import BlobOutput
-from typing import Annotated, Any, Iterator, Literal, Optional
+from typing import Annotated, Any, Iterator, Literal, Mapping, Optional
 from contextlib import contextmanager
 import piexif
 from threading import RLock
@@ -361,22 +361,70 @@ class StreamingPiCamera2(Thing):
     def capture_array(
         self, stream_name: Literal["main", "lores", "raw"] = "main"
     ) -> ArrayModel:
-        """Acquire one image from the camera and return as an array"""
+        """Acquire one image from the camera and return as an array
+        
+        This function will produce a nested list containing an uncompressed RGB image.
+        It's likely to be highly inefficient - raw and/or uncompressed captures using
+        binary image formats will be added in due course.
+        """
         with self.picamera() as cam:
             return cam.capture_array(stream_name)
+        
+    @thing_property
+    def camera_configuration(self) -> Mapping:
+        """The "configuration" dictionary of the picamera2 object
+        
+        The "configuration" sets the resolution and format of the camera's streams.
+        Together with the "tuning" it determines how the sensor is configured and
+        how the data is processed.
+
+        Note that the configuration may be modified when taking still images, and
+        this property refers to whatever configuration is currently in force -
+        usually the one used for the preview stream.
+        """
+        with self.picamera() as cam:
+            return cam.camera_configuration()
 
     @thing_action
     def capture_jpeg(
         self,
         thing_states_metadata: ThingStates,
-        stream_name: Literal["main", "lores", "raw"] = "main",
+        resolution: Literal["lores", "main", "full"] = "main",
     ) -> JPEGBlob:
-        """Acquire one image from the camera and return as an array"""
+        """Acquire one image from the camera as a JPEG
+        
+        The JPEG will be acquired using `Picamera2.capture_file`. If the
+        `resolution` parameter is `main` or `lores`, it will be captured
+        from the main preview stream, or the low-res preview stream,
+        respectively. This means the camera won't be reconfigured, and
+        the stream will not pause (though it may miss one frame).
+        
+        If `full` resolution is requested, we will briefly pause the
+        MJPEG stream and reconfigure the camera to capture a full
+        resolution image.
+        
+        Note that this always uses the image processing pipeline - to
+        bypass this, you must use a raw capture.
+        """
         fname = datetime.now().strftime("%Y-%m-%d-%H%M%S.jpeg")
         folder = TemporaryDirectory()
         path = os.path.join(folder.name, fname)
-        with self.picamera() as cam:
-            cam.capture_file(path, name=stream_name, format="jpeg")
+        config = self.camera_configuration
+        # Low-res and main streams are running already - so we don't need
+        # to reconfigure for these
+        if resolution in ("lores", "main") and config[resolution]:
+            with self.picamera() as cam:
+                cam.capture_file(path, name=resolution, format="jpeg")
+        else:
+            if resolution != "full":
+                logging.warning(f"There was no {resolution} stream, capturing full resolution")
+            with self.picamera(pause_stream=True) as cam:
+                logging.info(f"Reconfiguring camera for full resolution capture")
+                cam.configure(cam.create_still_configuration())
+                cam.start()
+                logging.info(f"capturing")
+                cam.capture_file(path, name="main", format="jpeg")
+                logging.info("done")
         # After the file is written, add metadata about the current Things
         exif_dict = piexif.load(path)
         exif_dict["Exif"][piexif.ExifIFD.UserComment] = json.dumps(
