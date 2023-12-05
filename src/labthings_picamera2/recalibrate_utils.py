@@ -63,38 +63,6 @@ def load_default_tuning(cam: Picamera2) -> dict:
         return cam.load_tuning_file(fname, dir=dir)
 
 
-def rgb_image(
-    camera: Picamera2, resize: Optional[Tuple[int, int]] = None, **kwargs
-) -> np.array:
-    """Capture an image and return an RGB numpy array"""
-    return camera.capture_array()
-
-
-def flat_lens_shading_table(camera: Picamera2) -> np.ndarray:
-    """Return a flat (i.e. unity gain) lens shading table.
-
-    This is mostly useful because it makes it easy to get the size
-    of the array correct.  NB if you are not using the forked picamera
-    library (with lens shading table support) it will raise an error.
-    """
-    set_lst_values(np.ones((4, 16, 12)), scamera)
-    return np.ones((4, 16, 12))
-
-
-def adjust_exposure_to_setpoint(camera: Picamera2, setpoint: int):
-    """Adjust the camera's exposure time until the maximum pixel value is <setpoint>.
-
-    NB this method uses RGB images (i.e. processed ones) not raw images.
-    """
-
-    logging.info(f"Adjusting shutter speed to hit setpoint {setpoint}")
-    for _ in range(3):
-        camera.controls.ExposureTime = int(
-            camera.controls.ExposureTime * setpoint / np.max(rgb_image(camera))
-        )
-        time.sleep(1)
-
-
 def set_minimum_exposure(camera: Picamera2):
     """Enable manual exposure, with low gain and shutter speed
 
@@ -454,6 +422,10 @@ def lst_from_camera(camera: Picamera2) -> LensShadingTables:
     """Acquire a raw image and use it to calculate a lens shading table."""
     if camera.started:
         camera.stop_recording()
+    # We will acquire a raw image with unpacked pixels, which is what the
+    # format below requests. Bit depth and Bayer order may be overwritten.
+    # TODO: don't assume 10-bit - the high quality camera uses 12.
+    # TODO: what's the best mode to use here?
     config = camera.create_still_configuration(raw={"format": "SBGGR10"})
     camera.configure(config)
     camera.start()
@@ -463,53 +435,27 @@ def lst_from_camera(camera: Picamera2) -> LensShadingTables:
     # raw_image is a 3D array, with full resolution and 3 colour channels.  No
     # de-mosaicing has been done, so 2/3 of the values are zero (3/4 for R and B
     # channels, 1/2 for green because there's twice as many green pixels).
+    format = camera.camera_configuration()["raw"]["format"]
+    print(f"Acquired a raw image in format {format}")
     channels = channels_from_bayer_array(raw_image)
     return lst_from_channels(channels)
 
 
-def recalibrate_camera(camera: Picamera2):
-    """Reset the lens shading table and exposure settings.
-
-    This method first resets to a flat lens shading table, then auto-exposes,
-    then generates a new lens shading table to make the current view uniform.
-    It should be run when the camera is looking at a uniform white scene.
-
-    NB the only parameter ``camera`` is a ``PiCamera`` instance and **not** a
-    ``StreamingCamera``.
-    """
-    # TODO
-    # camera.lens_shading_table = flat_lens_shading_table(camera)
-    # _ = rgb_image(camera)  # for some reason the camera won't work unless I do this!
-
-    # lens_shading_table = lst_from_camera(camera)
-
-    # camera.lens_shading_table = lens_shading_table
-    # _ = rgb_image(camera)
-
-    # Fix the AWB gains so the image is neutral
-    stop_after = False
-    if not camera.started:
-        camera.start()
-        stop_after = True
-
-    channel_means = np.mean(np.mean(rgb_image(camera), axis=0, dtype=float), axis=0)
-    old_gains = camera.controls.ColourGains  # TODO: this won't work
-    camera.controls.ColourGains = (
-        channel_means[1] / channel_means[0] * old_gains[0],
-        channel_means[1] / channel_means[2] * old_gains[1],
-    )
-    time.sleep(1)
-    # Ensure the background is bright but not saturated
-    adjust_exposure_to_setpoint(camera, 230)
-    if stop_after:
-        camera.stop()
-
-
 if __name__ == "__main__":
-    with Picamera2() as main_camera:
-        main_camera.start_preview()
+    """This block is untested but has been updated."""
+    with Picamera2() as cam:
+        tuning = load_default_tuning(cam)
+    f = np.ones((12, 16))
+    set_static_lst(tuning, f, f, f)
+    with Picamera2(tuning=tuning) as cam:
+        cam.start_preview()
         time.sleep(3)
         logging.info("Recalibrating...")
-        recalibrate_camera(main_camera)
+        adjust_shutter_and_gain_from_raw(cam)
+        adjust_white_balance_from_raw(cam)
+        lst = lst_from_camera(cam)
+        set_static_lst(tuning, *lst)
         logging.info("Done.")
+    with Picamera2(tuning=tuning) as cam:
+        cam.start_preview()
         time.sleep(2)
