@@ -180,7 +180,12 @@ class StreamingPiCamera2(Thing):
     exposure_time = PicameraControl(
         "ExposureTime", int, description="The exposure time in microseconds"
     )
-    sensor_modes = PropertyDescriptor(list[SensorMode], readonly=True)
+
+    @thing_property
+    def sensor_modes(self) -> list[SensorMode]:
+        """All the available modes the current sensor supports"""
+        with self.picamera() as cam:
+            return cam.sensor_modes
     
     @thing_property
     def sensor_resolution(self) -> tuple[int, int]:
@@ -234,7 +239,7 @@ class StreamingPiCamera2(Thing):
         self._picamera_lock = RLock()
 
     def __enter__(self):
-        self.populate_sensor_modes_and_default_tuning()
+        self.populate_default_tuning()
         self.initialise_tuning()
         self.initialise_picamera()
         self.settings_to_persistent_controls()
@@ -263,7 +268,7 @@ class StreamingPiCamera2(Thing):
                 if pause_stream and already_streaming:
                     self.start_streaming()
 
-    def populate_sensor_modes_and_default_tuning(self):
+    def populate_default_tuning(self):
         """Sensor modes are enumerated and stored, once, on start-up (`__enter__`).
 
         This opens and closes the camera - must be run before the camera is
@@ -271,7 +276,6 @@ class StreamingPiCamera2(Thing):
         """
         logging.info("Starting & reconfiguring camera to populate sensor_modes.")
         with Picamera2(camera_num=self.camera_num) as cam:
-            self.sensor_modes = cam.sensor_modes
             self.default_tuning = recalibrate_utils.load_default_tuning(cam)
         logging.info("Done reading sensor modes & default tuning.")
 
