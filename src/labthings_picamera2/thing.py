@@ -571,14 +571,8 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
-            #gain_r, gain_b = self.persistent_controls["ColourGains"]
-            #print(f"Colour gains currently {gain_r}, {gain_b}")
-            #gain_r *= np.min(Cr)
             Cr /= np.min(Cr)
-            #gain_b *= np.min(Cb)
             Cb /= np.min(Cb)
-            #self.persistent_controls["ColourGains"] = (gain_r, gain_b)
-            #print(f"Colour gains might now want to be {gain_r}, {gain_b}")
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
