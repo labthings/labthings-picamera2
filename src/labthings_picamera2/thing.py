@@ -556,6 +556,8 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera(pause_stream=True) as cam:
             recalibrate_utils.adjust_white_balance_from_raw(cam, percentile=99)
+            if self.lens_shading_is_static:
+                self.colour_gains = self.correct_colour_gains_for_lens_shading(self.colour_gains)
             self.update_persistent_controls()
 
     @thing_action
@@ -569,14 +571,14 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
-            gain_r, gain_b = self.persistent_controls["ColourGains"]
-            print(f"Colour gains currently {gain_r}, {gain_b}")
-            gain_r *= np.min(Cr)
+            #gain_r, gain_b = self.persistent_controls["ColourGains"]
+            #print(f"Colour gains currently {gain_r}, {gain_b}")
+            #gain_r *= np.min(Cr)
             Cr /= np.min(Cr)
-            gain_b *= np.min(Cb)
+            #gain_b *= np.min(Cb)
             Cb /= np.min(Cb)
-            self.persistent_controls["ColourGains"] = (gain_r, gain_b)
-            print(f"Colour gains might now want to be {gain_r}, {gain_b}")
+            #self.persistent_controls["ColourGains"] = (gain_r, gain_b)
+            #print(f"Colour gains might now want to be {gain_r}, {gain_b}")
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
@@ -593,8 +595,8 @@ class StreamingPiCamera2(Thing):
         """
         self.flat_lens_shading()
         self.auto_expose_from_minimum()
-        self.calibrate_white_balance()
         self.calibrate_lens_shading()
+        self.calibrate_white_balance()
 
     @thing_action
     def flat_lens_shading(self):
@@ -634,7 +636,37 @@ class StreamingPiCamera2(Thing):
             Cr=reshape_lst(alsc["calibrations_Cr"][0]["table"]),
             Cb=reshape_lst(alsc["calibrations_Cb"][0]["table"]),
         )
-
+    
+    def correct_colour_gains_for_lens_shading(
+            self, colour_gains: tuple[float, float]
+        ) -> tuple[float, float]:
+        """Correct white balance gains for the effect of lens shading
+        
+        The white balance algorithm we use assumes the brightest pixels
+        should be white, and that the only thing affecting the colour of
+        said pixels is the `colour_gains`.
+        
+        The lens shading correction is normalised such that the *minimum*
+        gain in the `Cr` and `Cb` channels is 1. The white balance 
+        assumption above requires that the gain for the brightest pixels
+        is 1. The solution might be that, when calibrating, we note which
+        pixels are brightest (usually the centre) and explicitly use
+        the LST values for there. However, for now I will assume that we
+        need to normalise by the **maximum** of the `Cr` and `Cb`
+        channels, which is correct the majority of the time.
+        """
+        if not self.lens_shading_is_static:
+            return colour_gains
+        lst = self.lens_shading_tables
+        # The Cr and Cb corrections are normalised to have a minimum of 1,
+        # but the white balance algorithm normalises the brightest pixels
+        # to be white, assuming the brightest pixels have equal gain from
+        # the LST. 
+        gain_r, gain_b = colour_gains
+        return (
+            float(gain_r / np.max(lst.Cr)),
+            float(gain_b / np.max(lst.Cb)),
+        )
 
     @thing_action
     def flat_lens_shading_chrominance(self):
