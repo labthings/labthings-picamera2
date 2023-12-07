@@ -1,8 +1,11 @@
 from __future__ import annotations
 from datetime import datetime
+import gc
 import json
 import logging
 import os
+import sys
+import tempfile
 import time
 from tempfile import TemporaryDirectory
 
@@ -25,6 +28,7 @@ import picamera2
 from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder
 from picamera2.outputs import Output
+import libcamera
 import numpy as np
 from . import recalibrate_utils
 
@@ -229,13 +233,35 @@ class StreamingPiCamera2(Thing):
         if hasattr(self, "_picamera_lock"):
             # Don't close the camera if it's in use
             self._picamera_lock.acquire()
-        if hasattr(self, "_picamera") and self._picamera:
-            print("Closing picamera object for reinitialisation")
-            logging.info("Camera object already exists, closing for reinitialisation")
-            self._picamera.close()
-        self._picamera = picamera2.Picamera2(
-            camera_num=self.camera_num, tuning=self.tuning
-        )
+        with tempfile.NamedTemporaryFile('w') as tuning_file:
+            # This duplicates logic in `Picamera2.__init__` to provide a tuning file
+            # that will be read when the camera system initialises.
+            # This is a necessary work-around until `picamera2` better supports
+            # reinitialisation of the camera with new tuning.
+            json.dump(self.tuning, tuning_file)
+            tuning_file.flush()  # but leave it open as closing it will delete it
+            os.environ["LIBCAMERA_RPI_TUNING_FILE"] = tuning_file.name
+            # NB even though we've put the tuning file in the environment, we will
+            # need to specify the filename in the `Picamera2` initialiser as otherwise
+            # it will be overwritten with None.
+            if hasattr(self, "_picamera") and self._picamera:
+                print("Closing picamera object for reinitialisation")
+                logging.info("Camera object already exists, closing for reinitialisation")
+                self._picamera.close()
+                print("closed, deleting picamera")
+                del self._picamera
+                print("deleting Picamera2._cm")
+                del Picamera2._cm
+                print("gc.collect()")
+                gc.collect()
+                Picamera2._cm = picamera2.picamera2.CameraManager()
+                m = libcamera.CameraManager.singleton()
+                print("libcamera.CameraManager.singleton().restart()")
+                m.restart()
+            print("[re]creating Picamera2 object")
+            self._picamera = picamera2.Picamera2(
+                camera_num=self.camera_num, tuning=self.tuning,
+            )
         self._picamera_lock = RLock()
 
     def __enter__(self):
@@ -550,7 +576,7 @@ class StreamingPiCamera2(Thing):
             gain_b *= np.min(Cb)
             Cb /= np.min(Cb)
             self.persistent_controls["ColourGains"] = (gain_r, gain_b)
-            print(f"Colour gains now {gain_r}, {gain_b}")
+            print(f"Colour gains might now want to be {gain_r}, {gain_b}")
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
