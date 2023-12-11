@@ -257,7 +257,13 @@ class StreamingPiCamera2(Thing):
                 Picamera2._cm = picamera2.picamera2.CameraManager()
                 m = libcamera.CameraManager.singleton()
                 print("libcamera.CameraManager.singleton().restart()")
-                m.restart()
+                try:
+                    m.restart()
+                except AttributeError:
+                    logging.error(
+                        "libcamera.CameraManager nas no attribute `restart`, you probably "
+                        "need to install the patched fork of `pylibcamera`"
+                    )
             print("[re]creating Picamera2 object")
             self._picamera = picamera2.Picamera2(
                 camera_num=self.camera_num, tuning=self.tuning,
@@ -630,6 +636,18 @@ class StreamingPiCamera2(Thing):
             Cr=reshape_lst(alsc["calibrations_Cr"][0]["table"]),
             Cb=reshape_lst(alsc["calibrations_Cb"][0]["table"]),
         )
+    
+    @lens_shading_tables.setter
+    def lens_shading_tables(self, lst: LensShading) -> None:
+        """Set the lens shading tables"""
+        with self.picamera(pause_stream=True):
+            recalibrate_utils.set_static_lst(
+                self.tuning,
+                luminance=lst.luminance,
+                cr=lst.Cr,
+                cb=lst.Cb,
+            )
+            self.initialise_picamera()
     
     def correct_colour_gains_for_lens_shading(
             self, colour_gains: tuple[float, float]
