@@ -1,64 +1,51 @@
-import os
-from picamera2 import Picamera2
-import time
-
+from __future__ import annotations
+from fastapi.testclient import TestClient
+from labthings_fastapi.thing_server import ThingServer
+from labthings_fastapi.thing_settings import ThingSettings
+from labthings_picamera2.thing import StreamingPiCamera2
+import anyio
 import pytest
 
-def load_default_tuning():
-    with Picamera2() as cam:
-        cp = cam.camera_properties
-        fname = f"{cp['Model']}.json"
-        return cam.load_tuning_file(fname)
+thing_server = ThingServer()
+cam = StreamingPiCamera2()
+thing_server.add_thing(cam, "/camera")
 
-def generate_bad_tuning():
-    default_tuning = load_default_tuning()
-    bad_tuning = default_tuning.copy()
-    bad_tuning["version"] = 999
-    return bad_tuning
+def test_tuning_updates(capsys: pytest.CaptureFixture):
+    print("Making StreamingPiCamera2")
+    cam = StreamingPiCamera2()
+    print("Making blocking portal")
+    with anyio.from_thread.start_blocking_portal() as portal:
+        cam._labthings_blocking_portal = portal
+        cam._labthings_thing_settings = ThingSettings("temp_settings.json")
+        print("Entering camera object")
+        with cam:
+            print("Entered")
+            captured = capsys.readouterr()
+            print(f"Setting up the camera printed {len(captured.err.splitlines())} lines")
+            cam.initialise_picamera()
+            captured = capsys.readouterr()
 
+            print(f"Re-initialising the camera printed {len(captured.err.splitlines())} lines")
+    assert False
 
-def print_tuning(read_file=False):
-    key = 'LIBCAMERA_RPI_TUNING_FILE'
-    if key in os.environ:
-        print(f"Tuning file environment variable: {os.environ[key]}")
-        if read_file:
-            with open(os.environ[key], "r") as f:
-                print(f.read())
-    else:
-        print("Tuning file environment variable not set")
+# def test_tuning_updates():
+#     # TestClient is a convenient way to run the Thing
+#     with TestClient(thing_server.app):
+#         oldversion = cam.tuning["version"]
+#         cam.tuning["version"] = 999  # deliberately cause an error
+#         with pytest.raises(IndexError):
+#             # If we reload the tuning, this will fail
+#             cam.initialise_picamera()
+#         # Reset it before the test closes - or there will be errors
+#         # in __exit__
+#         #cam.tuning["version"] = oldversion
+#         #cam.initialise_picamera()  # This hangs - can't recover from libcamera error.
 
-
-def _test_bad_tuning_after_good_tuning(configure):
-    bad_tuning = generate_bad_tuning()
-    default_tuning = load_default_tuning()
-    print_tuning()
-    print("opening camera with explicitly specified tuning")
-    with Picamera2(tuning=default_tuning) as cam:
-        print_tuning()
-        if configure:
-            cam.configure(cam.create_preview_configuration())
-    del cam
-    print(f"Opening camera with tuning['version'] = {bad_tuning['version']}")
-    with pytest.raises(IndexError):
-        # The bad version should cause a problem
-        cam = Picamera2(tuning=bad_tuning)
-        print_tuning()
-        print("Success (not expected)!")
-        del cam
-
-
-@pytest.mark.filterwarnings("ignore: Exception ignored")
-def test_bad_tuning_after_good_tuning_noconfigure():
-    _test_bad_tuning_after_good_tuning(False)
-
-@pytest.mark.filterwarnings("ignore: Exception ignored")
-def test_bad_tuning_after_good_tuning_configure():
-    _test_bad_tuning_after_good_tuning(True)
-
-@pytest.mark.filterwarnings("ignore: Exception ignored")
-def test_bad_tuning_after_good_tuning_noconfigure2():
-    _test_bad_tuning_after_good_tuning(False)
-
-@pytest.mark.filterwarnings("ignore: Exception ignored")
-def test_bad_tuning_after_good_tuning_configure2():
-    _test_bad_tuning_after_good_tuning(True)
+if __name__ == "__main__":
+    class FakeOutput:
+        err = ""
+        out = ""
+    class FakeCapsys:
+        def readouterr(self):
+            return FakeOutput()
+    test_tuning_updates(FakeCapsys())
