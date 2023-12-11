@@ -353,7 +353,7 @@ class StreamingPiCamera2(Thing):
                     ),
                 )
                 picam.start_encoder(
-                    MJPEGEncoder(self.mjpeg_bitrate),
+                    MJPEGEncoder(100000000),
                     PicameraStreamOutput(
                         self.lores_mjpeg_stream,
                         get_blocking_portal(self),
