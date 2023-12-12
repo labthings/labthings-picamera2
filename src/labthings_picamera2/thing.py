@@ -17,7 +17,7 @@ from labthings_fastapi.decorators import thing_action, thing_property
 from labthings_fastapi.outputs.mjpeg_stream import MJPEGStreamDescriptor, MJPEGStream
 from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
-from labthings_fastapi.dependencies.metadata import ThingStates
+from labthings_fastapi.dependencies.metadata import GetThingStates
 from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
 from labthings_fastapi.outputs.blob import BlobOutput
 from typing import Annotated, Any, Iterator, Literal, Mapping, Optional
@@ -432,7 +432,7 @@ class StreamingPiCamera2(Thing):
     @thing_action
     def capture_jpeg(
         self,
-        thing_states_metadata: ThingStates,
+        metadata_getter: GetThingStates,
         resolution: Literal["lores", "main", "full"] = "main",
     ) -> JPEGBlob:
         """Acquire one image from the camera as a JPEG
@@ -472,7 +472,7 @@ class StreamingPiCamera2(Thing):
         # After the file is written, add metadata about the current Things
         exif_dict = piexif.load(path)
         exif_dict["Exif"][piexif.ExifIFD.UserComment] = json.dumps(
-            thing_states_metadata
+            metadata_getter()
         ).encode("utf-8")
         piexif.insert(piexif.dump(exif_dict), path)
         return JPEGBlob.from_temporary_directory(folder, fname)
