@@ -383,6 +383,7 @@ class StreamingPiCamera2(Thing):
                 self.stream_active = False
                 if stop_web_stream:
                     self.mjpeg_stream.stop()
+                    self.lores_mjpeg_stream.stop()
                 logging.info(
                     f"Stopped MJPEG stream."
                 )
