@@ -4,7 +4,6 @@ import gc
 import json
 import logging
 import os
-import sys
 import tempfile
 import time
 from tempfile import TemporaryDirectory
@@ -121,10 +120,10 @@ class StreamingPiCamera2(Thing):
 
     def update_persistent_controls(self, discard_frames: int = 1):
         """Update the persistent controls dict from the camera
-        
+
         Query the camera and update the value of `persistent_controls` to
         match the current state of the camera.
-        
+
         There is a work-around here, that will suppress small updates. There
         appears to be a bug in the camera code that causes a slight drift in
         `ExposureTime` each time the camera is reinitialised: this can
@@ -141,7 +140,7 @@ class StreamingPiCamera2(Thing):
                 if k in self.persistent_controls:
                     if k in self.persistent_control_tolerances:
                         if (
-                            np.abs(self.persistent_controls[k] - v) 
+                            np.abs(self.persistent_controls[k] - v)
                             < self.persistent_control_tolerances[k]
                         ):
                             logging.debug(
@@ -213,7 +212,7 @@ class StreamingPiCamera2(Thing):
         """All the available modes the current sensor supports"""
         with self.picamera() as cam:
             return cam.sensor_modes
-    
+
     @thing_property
     def sensor_resolution(self) -> tuple[int, int]:
         """The native resolution of the camera's sensor"""
@@ -256,7 +255,7 @@ class StreamingPiCamera2(Thing):
         if hasattr(self, "_picamera_lock"):
             # Don't close the camera if it's in use
             self._picamera_lock.acquire()
-        with tempfile.NamedTemporaryFile('w') as tuning_file:
+        with tempfile.NamedTemporaryFile("w") as tuning_file:
             # This duplicates logic in `Picamera2.__init__` to provide a tuning file
             # that will be read when the camera system initialises.
             # This is a necessary work-around until `picamera2` better supports
@@ -269,7 +268,9 @@ class StreamingPiCamera2(Thing):
             # it will be overwritten with None.
             if hasattr(self, "_picamera") and self._picamera:
                 print("Closing picamera object for reinitialisation")
-                logging.info("Camera object already exists, closing for reinitialisation")
+                logging.info(
+                    "Camera object already exists, closing for reinitialisation"
+                )
                 self._picamera.close()
                 print("closed, deleting picamera")
                 del self._picamera
@@ -289,7 +290,8 @@ class StreamingPiCamera2(Thing):
                     )
             print("[re]creating Picamera2 object")
             self._picamera = picamera2.Picamera2(
-                camera_num=self.camera_num, tuning=self.tuning,
+                camera_num=self.camera_num,
+                tuning=self.tuning,
             )
         self._picamera_lock = RLock()
 
@@ -407,9 +409,7 @@ class StreamingPiCamera2(Thing):
                 if stop_web_stream:
                     self.mjpeg_stream.stop()
                     self.lores_mjpeg_stream.stop()
-                logging.info(
-                    f"Stopped MJPEG stream."
-                )
+                logging.info("Stopped MJPEG stream.")
 
             # Increase the resolution for taking an image
             time.sleep(
@@ -430,18 +430,18 @@ class StreamingPiCamera2(Thing):
         self, stream_name: Literal["main", "lores", "raw"] = "main"
     ) -> ArrayModel:
         """Acquire one image from the camera and return as an array
-        
+
         This function will produce a nested list containing an uncompressed RGB image.
         It's likely to be highly inefficient - raw and/or uncompressed captures using
         binary image formats will be added in due course.
         """
         with self.picamera() as cam:
             return cam.capture_array(stream_name)
-        
+
     @thing_property
     def camera_configuration(self) -> Mapping:
         """The "configuration" dictionary of the picamera2 object
-        
+
         The "configuration" sets the resolution and format of the camera's streams.
         Together with the "tuning" it determines how the sensor is configured and
         how the data is processed.
@@ -460,17 +460,17 @@ class StreamingPiCamera2(Thing):
         resolution: Literal["lores", "main", "full"] = "main",
     ) -> JPEGBlob:
         """Acquire one image from the camera as a JPEG
-        
+
         The JPEG will be acquired using `Picamera2.capture_file`. If the
         `resolution` parameter is `main` or `lores`, it will be captured
         from the main preview stream, or the low-res preview stream,
         respectively. This means the camera won't be reconfigured, and
         the stream will not pause (though it may miss one frame).
-        
+
         If `full` resolution is requested, we will briefly pause the
         MJPEG stream and reconfigure the camera to capture a full
         resolution image.
-        
+
         Note that this always uses the image processing pipeline - to
         bypass this, you must use a raw capture.
         """
@@ -485,12 +485,14 @@ class StreamingPiCamera2(Thing):
                 cam.capture_file(path, name=resolution, format="jpeg")
         else:
             if resolution != "full":
-                logging.warning(f"There was no {resolution} stream, capturing full resolution")
+                logging.warning(
+                    f"There was no {resolution} stream, capturing full resolution"
+                )
             with self.picamera(pause_stream=True) as cam:
-                logging.info(f"Reconfiguring camera for full resolution capture")
+                logging.info("Reconfiguring camera for full resolution capture")
                 cam.configure(cam.create_still_configuration())
                 cam.start()
-                logging.info(f"capturing")
+                logging.info("capturing")
                 cam.capture_file(path, name="main", format="jpeg")
                 logging.info("done")
         # After the file is written, add metadata about the current Things
@@ -587,7 +589,9 @@ class StreamingPiCamera2(Thing):
         with self.picamera(pause_stream=True) as cam:
             recalibrate_utils.adjust_white_balance_from_raw(cam, percentile=99)
             if self.lens_shading_is_static:
-                self.colour_gains = self.correct_colour_gains_for_lens_shading(self.colour_gains)
+                self.colour_gains = self.correct_colour_gains_for_lens_shading(
+                    self.colour_gains
+                )
             self.update_persistent_controls()
 
     @thing_action
@@ -638,7 +642,7 @@ class StreamingPiCamera2(Thing):
     @thing_property
     def lens_shading_tables(self) -> Optional[LensShading]:
         """The current lens shading (i.e. flat-field correction)
-        
+
         This returns the current lens shading correction, as three 2D lists
         each with dimensions 16x12. This assumes that we are using a static
         lens shading table - if adaptive control is enabled, or if there
@@ -650,17 +654,17 @@ class StreamingPiCamera2(Thing):
         alsc = Picamera2.find_tuning_algo(self.tuning, "rpi.alsc")
         if any(len(alsc[f"calibrations_C{c}"]) != 1 for c in ("r", "b")):
             return None
-        
+
         def reshape_lst(lin: list[float]) -> list[list[float]]:
             w, h = 16, 12
-            return [lin[w*i:w*(i+1)] for i in range(h)]
+            return [lin[w * i : w * (i + 1)] for i in range(h)]
 
         return LensShading(
             luminance=reshape_lst(alsc["luminance_lut"]),
             Cr=reshape_lst(alsc["calibrations_Cr"][0]["table"]),
             Cb=reshape_lst(alsc["calibrations_Cb"][0]["table"]),
         )
-    
+
     @lens_shading_tables.setter
     def lens_shading_tables(self, lst: LensShading) -> None:
         """Set the lens shading tables"""
@@ -672,18 +676,18 @@ class StreamingPiCamera2(Thing):
                 cb=lst.Cb,
             )
             self.initialise_picamera()
-    
+
     def correct_colour_gains_for_lens_shading(
-            self, colour_gains: tuple[float, float]
-        ) -> tuple[float, float]:
+        self, colour_gains: tuple[float, float]
+    ) -> tuple[float, float]:
         """Correct white balance gains for the effect of lens shading
-        
+
         The white balance algorithm we use assumes the brightest pixels
         should be white, and that the only thing affecting the colour of
         said pixels is the `colour_gains`.
-        
+
         The lens shading correction is normalised such that the *minimum*
-        gain in the `Cr` and `Cb` channels is 1. The white balance 
+        gain in the `Cr` and `Cb` channels is 1. The white balance
         assumption above requires that the gain for the brightest pixels
         is 1. The solution might be that, when calibrating, we note which
         pixels are brightest (usually the centre) and explicitly use
@@ -697,7 +701,7 @@ class StreamingPiCamera2(Thing):
         # The Cr and Cb corrections are normalised to have a minimum of 1,
         # but the white balance algorithm normalises the brightest pixels
         # to be white, assuming the brightest pixels have equal gain from
-        # the LST. 
+        # the LST.
         gain_r, gain_b = colour_gains
         return (
             float(gain_r / np.max(lst.Cr)),
@@ -729,15 +733,14 @@ class StreamingPiCamera2(Thing):
         with self.picamera(pause_stream=True):
             recalibrate_utils.copy_alsc_section(self.default_tuning, self.tuning)
             self.initialise_picamera()
-    
+
     @thing_property
     def lens_shading_is_static(self) -> bool:
         """Whether the lens shading is static
-        
+
         This property is true if the lens shading correction has been set to use
         a static table (i.e. the number of automatic correction iterations is zero).
         The default LST is not static, but all the calibration controls will set it
         to be static (except "reset")
         """
         return recalibrate_utils.lst_is_static(self.tuning)
-

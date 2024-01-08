@@ -33,7 +33,7 @@ picamera.lens_shading_table = lst
 from __future__ import annotations
 import logging
 import time
-from typing import List, Optional, Tuple
+from typing import List, Tuple
 from pydantic import BaseModel
 import numpy as np
 
@@ -350,8 +350,7 @@ def lst_from_channels(channels: np.ndarray) -> LensShadingTables:
                     padded_image_channel[
                         step[0] // 2 + dx :: step[0], step[1] // 2 + dy :: step[1]
                     ]
-                    - 64  # 64 is the black level
-                    # TODO: read black level from camera
+                    - blacklevel
                 )
         ls_channel /= box**2
         # The original C code written by 6by9 normalises to the central 64 pixels in each channel.
