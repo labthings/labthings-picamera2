@@ -289,6 +289,7 @@ def get_channel_percentiles(
 
     channels = channels_from_bayer_array(camera.capture_array("raw"))
 
+    # TODO: read black level from camera rather than hard-coding 64
     return np.percentile(channels, percentile, axis=(1, 2)) - 64
 
 
