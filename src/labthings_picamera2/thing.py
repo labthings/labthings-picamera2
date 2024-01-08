@@ -48,10 +48,8 @@ class PicameraControl(PropertyDescriptor):
         self.control_name = control_name
 
     def _getter(self, obj: StreamingPiCamera2):
-        print(f"getting {self.control_name} from {obj}")
         with obj.picamera() as cam:
             ret = cam.capture_metadata()[self.control_name]
-            print(f"Trying to return camera control {self.control_name} as `{ret}`")
             return ret
 
     def _setter(self, obj: StreamingPiCamera2, value: Any):
@@ -117,16 +115,41 @@ class StreamingPiCamera2(Thing):
             "Saturation": 1,
             "Sharpness": 1,
         }
+        self.persistent_control_tolerances = {
+            "ExposureTime": 30,
+        }
 
     def update_persistent_controls(self, discard_frames: int = 1):
-        """Update the persistent controls dict from the camera"""
+        """Update the persistent controls dict from the camera
+        
+        Query the camera and update the value of `persistent_controls` to
+        match the current state of the camera.
+        
+        There is a work-around here, that will suppress small updates. There
+        appears to be a bug in the camera code that causes a slight drift in
+        `ExposureTime` each time the camera is reinitialised: this can
+        add up over time, particularly if the camera is reconfigured many
+        times. To get around this, we look in `self.persistent_control_tolerances`
+        and only update `self.persistent_controls` if the change is greater than
+        this tolerance.
+        """
         with self.picamera() as cam:
             for i in range(discard_frames):
                 # Discard frames, so we know our data is fresh
                 cam.capture_metadata()
             for k, v in cam.capture_metadata().items():
                 if k in self.persistent_controls:
-                    print(f"Updating persistent control {k} to {v}")
+                    if k in self.persistent_control_tolerances:
+                        if (
+                            np.abs(self.persistent_controls[k] - v) 
+                            < self.persistent_control_tolerances[k]
+                        ):
+                            logging.debug(
+                                f"Ignoring a small change in persistent control {k}"
+                                f"from {self.persistent_controls[k]} to {v}"
+                                "while updating persistent controls."
+                            )
+                            continue  # Ignore small changes, to avoid drift
                     self.persistent_controls[k] = v
         self.thing_settings.update(self.persistent_controls)
 
