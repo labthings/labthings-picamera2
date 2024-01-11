@@ -386,7 +386,7 @@ class StreamingPiCamera2(Thing):
                     name="lores",
                 )
             except Exception as e:
-                logging.info("Error while starting preview:")
+                logging.exception("Error while starting preview: {e}")
                 logging.exception(e)
             else:
                 self.stream_active = True
@@ -516,10 +516,12 @@ class StreamingPiCamera2(Thing):
         stream (either "main" for the preview stream, or "lores" for the low
         resolution preview). No metadata is returned.
         """
+        logging.info(f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) starting")
         stream = (
             self.lores_mjpeg_stream if stream_name == "lores" else self.mjpeg_stream
         )
         frame = portal.call(stream.grab_frame)
+        logging.info(f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame")
         return JPEGBlob.from_bytes(frame)
 
     @thing_action
