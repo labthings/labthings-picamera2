@@ -170,7 +170,7 @@ class StreamingPiCamera2(Thing):
 
     stream_resolution = PropertyDescriptor(
         tuple[int, int],
-        initial_value=(1640, 1232),
+        initial_value=(820, 616),
         description="Resolution to use for the MJPEG stream",
     )
     mjpeg_bitrate = PropertyDescriptor(
