@@ -175,7 +175,7 @@ class StreamingPiCamera2(Thing):
     )
     mjpeg_bitrate = PropertyDescriptor(
         Optional[int],
-        initial_value=None,
+        initial_value=100000000,
         description="Bitrate for MJPEG stream (None for default)",
     )
 
