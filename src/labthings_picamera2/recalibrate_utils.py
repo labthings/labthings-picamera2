@@ -33,9 +33,10 @@ picamera.lens_shading_table = lst
 from __future__ import annotations
 import logging
 import time
-from typing import List, Tuple
+from typing import List, Optional, Tuple
 from pydantic import BaseModel
 import numpy as np
+from scipy.ndimage import zoom
 
 from picamera2 import Picamera2
 
@@ -229,7 +230,11 @@ def adjust_shutter_and_gain_from_raw(
 
 
 def adjust_white_balance_from_raw(
-    camera: Picamera2, percentile: float = 99
+    camera: Picamera2,
+    percentile: float = 99,
+    luminance: Optional[np.ndarray] = None,
+    Cr: Optional[np.ndarray] = None,
+    Cb: Optional[np.ndarray] = None,
 ) -> Tuple[float, float]:
     """Adjust the white balance in a single shot, based on the raw image.
 
@@ -237,12 +242,25 @@ def adjust_white_balance_from_raw(
     We should probably have better logic to verify the channels really
     are BGGR...
     """
+    channel_gains: Optional[np.ndarray] = None
+    if luminance is not None and Cr is not None and Cb is not None:
+        # Reconstruct a low-resolution image from the lens shading tables
+        # and use it to normalise the raw image, to compensate for
+        # the brightest pixels in each channel not coinciding.
+        grids = grids_from_lst(luminance, Cr, Cb)
+        channel_gains = 1/grids
     config = camera.create_still_configuration(raw={"format": "SBGGR10"})
     camera.configure(config)
     camera.start()
-    blue, g1, g2, red = get_channel_percentiles(camera, percentile)
+    blue, g1, g2, red = get_channel_percentiles(camera, percentile, channel_gains=channel_gains)
     green = (g1 + g2) / 2.0
     new_awb_gains = (green / red, green / blue)
+    if Cr is not None and Cb is not None:
+        # The LST algorithm normalises Cr and Cb by their minimum. 
+        # The lens shading correction only ever boosts the red and blue values.
+        # Here, we decrease the gains by the minimum value of Cr and Cb.
+        new_awb_gains = (green / red * np.min(Cr), green / blue * np.min(Cb))
+
     logging.info(
         f"Raw white point is R: {red} G: {green} B: {blue}, "
         f"setting AWB gains to ({new_awb_gains[0]:.2f}, "
@@ -274,7 +292,10 @@ def channels_from_bayer_array(bayer_array: np.ndarray) -> np.ndarray:
 
 
 def get_channel_percentiles(
-    camera: Picamera2, percentile: float, reconfigure=True
+    camera: Picamera2,
+    percentile: float,
+    reconfigure=True,
+    channel_gains: Optional[np.ndarray] = None,
 ) -> np.ndarray:
     """Calculate the brightness percentile of the pixels in each channel
 
@@ -288,16 +309,83 @@ def get_channel_percentiles(
     """
 
     channels = channels_from_bayer_array(camera.capture_array("raw"))
-
+    if channel_gains is not None:
+        logging.info(f"Calculating percentiles with channel gains")
+        logging.info(f"Max gains: {np.max(channel_gains, axis=(1,2))}")
+        logging.info(f"Min gains: {np.min(channel_gains, axis=(1,2))}")
+        logging.info(f"Shapes: {channel_gains.shape}, {channels.shape}")
+        # Applying gains to the channels allows us to take account of
+        # lens shading when calculating white balance.
+        if channel_gains.shape[1:] != channels.shape[1:]:
+            channel_gains = upsample_channels(channel_gains, channels.shape[1:])
+        logging.info(f"Before gains, channel maxima are {np.max(channels, axis=(1,2))}")
+        channels = channels * channel_gains
+        logging.info(f"After gains, channel maxima are {np.max(channels, axis=(1,2))}")
     # TODO: read black level from camera rather than hard-coding 64
     return np.percentile(channels, percentile, axis=(1, 2)) - 64
 
 
-LensShadingTables = Tuple[np.ndarray, np.ndarray, np.ndarray]
+LensShadingTables = tuple[np.ndarray, np.ndarray, np.ndarray]
 
+
+def get_16x12_grid(chan: np.ndarray, dx: int, dy: int):
+    """Compresses channel down to a 16x12 grid - from libcamera
+
+    This is taken from https://git.linuxtv.org/libcamera.git/tree/utils/raspberrypi/ctt/ctt_alsc.py
+    for consistency.
+    """
+    grid = []
+    """
+    since left and bottom border will not necessarily have rectangles of
+    dimension dx x dy, the 32nd iteration has to be handled separately.
+    """
+    for i in range(11):
+        for j in range(15):
+            grid.append(np.mean(chan[dy*i:dy*(1+i), dx*j:dx*(1+j)]))
+        grid.append(np.mean(chan[dy*i:dy*(1+i), 15*dx:]))
+    for j in range(15):
+        grid.append(np.mean(chan[11*dy:, dx*j:dx*(1+j)]))
+    grid.append(np.mean(chan[11*dy:, 15*dx:]))
+    """
+    return as np.array, ready for further manipulation
+    """
+    return np.reshape(np.array(grid), (12, 16))
+
+def upsample_channels(grids: np.ndarray, shape: tuple[int]):
+    """Zoom an image in the last two dimensions
+
+    This is effectively the inverse operation of `get_16x12_grid`
+    """
+    zoom_factors = [1,] + list(np.ceil(np.array(shape)/np.array(grids.shape[1:])))
+    return zoom(grids, zoom_factors, order=1)[:, :shape[0], :shape[1]]
+
+def downsampled_channels(channels: np.ndarray, blacklevel=64) -> list[np.ndarray]:
+    """Generate a downsampled, un-normalised image from which to calculate the LST
+
+    TODO: blacklevel probably ought to be determined from the camera...
+    """
+    channel_shape = np.array(channels.shape[1:])
+    lst_shape = np.array([12,16])
+    step = np.ceil(channel_shape/lst_shape).astype(int)
+    return np.stack(
+        [
+            get_16x12_grid(channels[i, ...].astype(float) - blacklevel, step[1], step[0])
+            for i in range(channels.shape[0])
+        ],
+        axis=0,
+    )
 
 def lst_from_channels(channels: np.ndarray) -> LensShadingTables:
     """Given the 4 Bayer colour channels from a white image, generate a LST.
+
+    Internally, is just calls `downsampled_channels` and `lst_from_grids`.
+    """
+    grids = downsampled_channels(channels)
+    return lst_from_grids(grids)
+
+
+def lst_from_grids(grids: np.ndarray) -> LensShadingTables:
+    """Given 4 downsampled grids, generate the luminance and chrominance tables
 
     The LST format has changed with `picamera2` and now uses a fixed resolution,
     and is in luminance, Cr, Cb format. This function returns three ndarrays of
@@ -306,69 +394,31 @@ def lst_from_channels(channels: np.ndarray) -> LensShadingTables:
     # TODO: make consistent with
     https://git.linuxtv.org/libcamera.git/tree/utils/raspberrypi/ctt/ctt_alsc.py
     """
-    channel_resolution: np.ndarray = np.array(channels.shape[1:])
-    # NB channels have half the resolution of the sensor
-    lst_resolution = np.array([12, 16])  # Now fixed as a constant in picamera2
-    # "step" should match `dx, dy` in ctt_alsc.py, about line 131
-    step = np.ceil((channel_resolution - 1) / lst_resolution).astype(
-        int
-    )  # pixels per section
-    lens_shading: np.ndarray = np.zeros(
-        [channels.shape[0]] + list(lst_resolution), dtype=float
-    )
-    blacklevel = 64  # TODO: read from camera
-    for i in range(lens_shading.shape[0]):  # once for each of R, G1, G2, B
-        image_channel: np.ndarray = channels[i, :, :]
-        iw: int
-        ih: int
-        iw, ih = image_channel.shape
-        ls_channel: np.ndarray = lens_shading[i, :, :]
-        lw: int
-        lh: int
-        lw, lh = ls_channel.shape
-        # The lens shading grid may extend past the edge of the sensor, because it must
-        # sit at whole-pixel values, and has a fixed number of grid cells (16x12).
-        # Here, we pad the image channel so it fills the last grid cell.
-        padded_image_channel: np.ndarray = np.pad(
-            image_channel, [(0, lw * step[0] - iw), (0, lh * step[1] - ih)], mode="edge"
-        )  # Pad image to the right and bottom
-        logging.info(
-            "Channel shape: %sx%s, shading table shape: %sx%s, after padding %s",
-            iw,
-            ih,
-            lw * step[0],
-            lh * step[1],
-            padded_image_channel.shape,
-        )
-        # Next, fill the shading table (except edge pixels).  Please excuse the
-        # for loop - I know it's not fast but this code needn't be!
-        box: int = 9  # We average together a square of this side length for each pixel.
-        # NB the camera tuning tool now takes the mean of the whole of each grid site.
-        # see get_16x12_grid in ctt_alsc.py
-        for dx in np.arange(box) - box // 2:
-            for dy in np.arange(box) - box // 2:
-                ls_channel[:, :] += (
-                    padded_image_channel[
-                        step[0] // 2 + dx :: step[0], step[1] // 2 + dy :: step[1]
-                    ]
-                    - blacklevel
-                )
-        ls_channel /= box**2
-        # The original C code written by 6by9 normalises to the central 64 pixels in each channel.
-        # ls_channel /= np.mean(image_channel[iw//2-4:iw//2+4, ih//2-4:ih//2+4])
-        # I have had better results just normalising to the maximum:
-        ls_channel /= np.max(ls_channel)
+    r: np.ndarray = grids[3, ...] 
+    g: np.ndarray = np.mean(grids[1:3, ...], axis=0)
+    b: np.ndarray = grids[0, ...]
 
     # What we actually want to calculate is the gains needed to compensate for the
     # lens shading - that's 1/lens_shading_table_float as we currently have it.
-    g: np.ndarray = np.mean(lens_shading[1:3, ...], axis=0)
-    r: np.ndarray = lens_shading[3, ...]
-    b: np.ndarray = lens_shading[0, ...]
-    luminance_gains: np.ndarray = 1 / g
+    luminance_gains: np.ndarray = np.max(g) / g  # Minimum luminance gain is 1
     cr_gains: np.ndarray = g / r
+    #cr_gains /= cr_gains[5, 7]  # Normalise so the central colour doesn't change
     cb_gains: np.ndarray = g / b
+    #cb_gains /= cb_gains[5, 7]
     return luminance_gains, cr_gains, cb_gains
 
+def grids_from_lst(lum: np.ndarray, Cr: np.ndarray, Cb: np.ndarray) -> np.ndarray:
+    """Convert form luminance/chrominance dict to four RGGB channels
+    
+    Note that these will be normalised - the maximum green value is always 1.
+    Also, note that the channels are BGGR, to be consistent with the
+    `channels_from_raw_image` function. This should probably change in the
+    future.
+    """
+    G = 1/np.array(lum)
+    R = G/np.array(Cr)
+    B = G/np.array(Cb)
+    return np.stack([B, G, G, R], axis=0)
 
 def set_static_lst(
     tuning: dict,
@@ -422,6 +472,11 @@ def copy_alsc_section(from_tuning: dict, to_tuning: dict):
 
 def lst_from_camera(camera: Picamera2) -> LensShadingTables:
     """Acquire a raw image and use it to calculate a lens shading table."""
+    channels = raw_channels_from_camera(camera)
+    return lst_from_channels(channels)
+
+def raw_channels_from_camera(camera: Picamera2) -> LensShadingTables:
+    """Acquire a raw image and return a 4xNxM array of the colour channels."""
     if camera.started:
         camera.stop_recording()
     # We will acquire a raw image with unpacked pixels, which is what the
@@ -439,8 +494,7 @@ def lst_from_camera(camera: Picamera2) -> LensShadingTables:
     # channels, 1/2 for green because there's twice as many green pixels).
     format = camera.camera_configuration()["raw"]["format"]
     print(f"Acquired a raw image in format {format}")
-    channels = channels_from_bayer_array(raw_image)
-    return lst_from_channels(channels)
+    return channels_from_bayer_array(raw_image)
 
 
 if __name__ == "__main__":
