@@ -101,11 +101,9 @@ def test_exposure_settings(camera: Picamera2, percentile: float) -> ExposureTest
     the camera's shutter and gain values.
     """
     camera.capture_array("raw")  # controls might not be updated for the first frame?
-    max_brightness = np.max(
-        get_channel_percentiles(
-            camera,
-            percentile,
-        )
+    max_brightness = np.percentile(
+        channels_from_bayer_array(camera.capture_array("raw")),
+        percentile,
     )
     # The reported brightness can, theoretically, be negative or zero
     # because of black level compensation.  The line below forces a
