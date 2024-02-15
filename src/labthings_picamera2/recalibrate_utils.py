@@ -33,7 +33,7 @@ picamera.lens_shading_table = lst
 from __future__ import annotations
 import logging
 import time
-from typing import List, Optional, Tuple
+from typing import List, Literal, Optional, Tuple
 from pydantic import BaseModel
 import numpy as np
 from scipy.ndimage import zoom
@@ -235,6 +235,8 @@ def adjust_white_balance_from_raw(
     luminance: Optional[np.ndarray] = None,
     Cr: Optional[np.ndarray] = None,
     Cb: Optional[np.ndarray] = None,
+    luminance_power: float = 1.0,
+    method: Literal["percentile", "centre"] = "centre",
 ) -> Tuple[float, float]:
     """Adjust the white balance in a single shot, based on the raw image.
 
@@ -242,17 +244,31 @@ def adjust_white_balance_from_raw(
     We should probably have better logic to verify the channels really
     are BGGR...
     """
-    channel_gains: Optional[np.ndarray] = None
+    config = camera.create_still_configuration(raw={"format": "SBGGR10"})
+    camera.configure(config)
+    camera.start()
+    channels = channels_from_bayer_array(camera.capture_array("raw"))
+    #logging.info(f"White balance: channels were retrieved with shape {channels.shape}.")
     if luminance is not None and Cr is not None and Cb is not None:
         # Reconstruct a low-resolution image from the lens shading tables
         # and use it to normalise the raw image, to compensate for
         # the brightest pixels in each channel not coinciding.
-        grids = grids_from_lst(luminance, Cr, Cb)
+        grids = grids_from_lst(np.array(luminance)**luminance_power, Cr, Cb)
         channel_gains = 1/grids
-    config = camera.create_still_configuration(raw={"format": "SBGGR10"})
-    camera.configure(config)
-    camera.start()
-    blue, g1, g2, red = get_channel_percentiles(camera, percentile, channel_gains=channel_gains)
+        if channel_gains.shape[1:] != channels.shape[1:]:
+            channel_gains = upsample_channels(channel_gains, channels.shape[1:])
+        logging.info(f"Before gains, channel maxima are {np.max(channels, axis=(1,2))}")
+        channels = channels * channel_gains
+        logging.info(f"After gains, channel maxima are {np.max(channels, axis=(1,2))}")
+    if method == "centre":
+        _, h, w = channels.shape
+        blue, g1, g2, red = np.mean(
+            channels[:, 9*h//20:11*h//20, 9*w//20:11*w//20],
+            axis=(1,2),
+        ) - 64
+    else:
+        # TODO: read black level from camera rather than hard-coding 64
+        blue, g1, g2, red = np.percentile(channels, percentile, axis=(1, 2)) - 64
     green = (g1 + g2) / 2.0
     new_awb_gains = (green / red, green / blue)
     if Cr is not None and Cb is not None:
@@ -289,40 +305,6 @@ def channels_from_bayer_array(bayer_array: np.ndarray) -> np.ndarray:
         channels[i, :, :] = bayer_array[offset[0] :: 2, offset[1] :: 2]
 
     return channels
-
-
-def get_channel_percentiles(
-    camera: Picamera2,
-    percentile: float,
-    reconfigure=True,
-    channel_gains: Optional[np.ndarray] = None,
-) -> np.ndarray:
-    """Calculate the brightness percentile of the pixels in each channel
-
-    Camera should be started and configured for raw frames
-
-    This is a number between -64 and 959 for each channel, because the
-    camera takes 10-bit images (maximum=1023) and its zero level is set
-    at 64 for denoising purposes (there's black level compensation built
-    in, and to avoid skewing the noise, the black level is set as 64 to
-    leave some room for negative values.
-    """
-
-    channels = channels_from_bayer_array(camera.capture_array("raw"))
-    if channel_gains is not None:
-        logging.info(f"Calculating percentiles with channel gains")
-        logging.info(f"Max gains: {np.max(channel_gains, axis=(1,2))}")
-        logging.info(f"Min gains: {np.min(channel_gains, axis=(1,2))}")
-        logging.info(f"Shapes: {channel_gains.shape}, {channels.shape}")
-        # Applying gains to the channels allows us to take account of
-        # lens shading when calculating white balance.
-        if channel_gains.shape[1:] != channels.shape[1:]:
-            channel_gains = upsample_channels(channel_gains, channels.shape[1:])
-        logging.info(f"Before gains, channel maxima are {np.max(channels, axis=(1,2))}")
-        channels = channels * channel_gains
-        logging.info(f"After gains, channel maxima are {np.max(channels, axis=(1,2))}")
-    # TODO: read black level from camera rather than hard-coding 64
-    return np.percentile(channels, percentile, axis=(1, 2)) - 64
 
 
 LensShadingTables = tuple[np.ndarray, np.ndarray, np.ndarray]

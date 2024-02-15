@@ -581,15 +581,23 @@ class StreamingPiCamera2(Thing):
             self.update_persistent_controls()
 
     @thing_action
-    def calibrate_white_balance(self):
+    def calibrate_white_balance(
+        self,
+        method: Literal["percentile", "centre"] = "centre",
+        luminance_power: float = 1.0,
+    ):
         """Correct the white balance of the image
 
-        This method requires a neutral image, such that the 99th centile of
-        each colour channel should correspond to white. We calculate the
-        centiles and use this to set the colour gains.
+        This calibration requires a neutral image, such that the 99th centile 
+        of each colour channel should correspond to white. We calculate the
+        centiles and use this to set the colour gains. This is done on the raw
+        image with the lens shading correction applied, which should mean
+        that the image is uniform, rather than weighted towards the centre.
+
+        If `method` is `"centre"`, we will correct the mean of the central 10%
+        of the image.
         """
         with self.picamera(pause_stream=True) as cam:
-            channel_gains: Optional[np.ndarray] = None
             if self.lens_shading_is_static:
                 lst: LensShading = self.lens_shading_tables
                 recalibrate_utils.adjust_white_balance_from_raw(
@@ -598,10 +606,12 @@ class StreamingPiCamera2(Thing):
                     luminance = lst.luminance,
                     Cr = lst.Cr,
                     Cb = lst.Cb,
+                    luminance_power = luminance_power,
+                    method = method,
                 )
             else:
                 recalibrate_utils.adjust_white_balance_from_raw(
-                    cam, percentile=99
+                    cam, percentile=99, method=method
                 )
             self.update_persistent_controls()
 
