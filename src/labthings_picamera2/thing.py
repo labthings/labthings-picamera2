@@ -150,7 +150,7 @@ class StreamingPiCamera2(Thing):
                             )
                             continue  # Ignore small changes, to avoid drift
                     self.persistent_controls[k] = v
-        self.thing_settings.update(self.persistent_controls)
+        self.thing_settings.update(self.persistent_controls)  # TODO: Is this saving to the wrong place?
 
     def settings_to_persistent_controls(self):
         """Update the persistent controls dict from the settings dict
@@ -581,18 +581,37 @@ class StreamingPiCamera2(Thing):
             self.update_persistent_controls()
 
     @thing_action
-    def calibrate_white_balance(self):
+    def calibrate_white_balance(
+        self,
+        method: Literal["percentile", "centre"] = "centre",
+        luminance_power: float = 1.0,
+    ):
         """Correct the white balance of the image
 
-        This method requires a neutral image, such that the 99th centile of
-        each colour channel should correspond to white. We calculate the
-        centiles and use this to set the colour gains.
+        This calibration requires a neutral image, such that the 99th centile 
+        of each colour channel should correspond to white. We calculate the
+        centiles and use this to set the colour gains. This is done on the raw
+        image with the lens shading correction applied, which should mean
+        that the image is uniform, rather than weighted towards the centre.
+
+        If `method` is `"centre"`, we will correct the mean of the central 10%
+        of the image.
         """
         with self.picamera(pause_stream=True) as cam:
-            recalibrate_utils.adjust_white_balance_from_raw(cam, percentile=99)
             if self.lens_shading_is_static:
-                self.colour_gains = self.correct_colour_gains_for_lens_shading(
-                    self.colour_gains
+                lst: LensShading = self.lens_shading_tables
+                recalibrate_utils.adjust_white_balance_from_raw(
+                    cam,
+                    percentile = 99,
+                    luminance = lst.luminance,
+                    Cr = lst.Cr,
+                    Cb = lst.Cb,
+                    luminance_power = luminance_power,
+                    method = method,
+                )
+            else:
+                recalibrate_utils.adjust_white_balance_from_raw(
+                    cam, percentile=99, method=method
                 )
             self.update_persistent_controls()
 
@@ -607,8 +626,6 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
-            Cr /= np.min(Cr)
-            Cb /= np.min(Cb)
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
