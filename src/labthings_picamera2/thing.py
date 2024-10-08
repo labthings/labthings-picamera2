@@ -196,13 +196,7 @@ class StreamingPiCamera2(Thing):
     lores_mjpeg_stream = MJPEGStreamDescriptor()
     analogue_gain = PicameraControl("AnalogueGain", float)
     colour_gains = PicameraControl("ColourGains", tuple[float, float])
-    colour_correction_matrix = PicameraControl(
-        "ColourCorrectionMatrix",
-        tuple[float, float, float, float, float, float, float, float, float],
-    )
-    exposure_time = PicameraControl(
-        "ExposureTime", int, description="The exposure time in microseconds"
-    )
+
     exposure_time = PicameraControl(
         "ExposureTime", int, description="The exposure time in microseconds"
     )
@@ -627,6 +621,27 @@ class StreamingPiCamera2(Thing):
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
+            self.initialise_picamera()
+
+    @thing_property
+    def colour_correction_matrix(self) -> tuple[float,float,float,float,float,float,float,float,float]:
+        """An alias for `colour_correction_matrix` to fit the micromanager API"""
+        return self.thing_settings.get("colour_correction_matrix", tuple(recalibrate_utils.get_static_ccm(self.tuning)[0]["ccm"]))
+
+    @colour_correction_matrix.setter  # type: ignore
+    def colour_correction_matrix(self, value):
+        self.thing_settings["colour_correction_matrix"] = value
+        self.calibrate_colour_correction(value)
+
+    @thing_action
+    def calibrate_colour_correction(
+        self,
+        c: tuple
+        ):
+        """Overwrite the colour correction matrix in camera tuning
+        """
+        with self.picamera(pause_stream=True) as cam:
+            recalibrate_utils.set_static_ccm(self.tuning, c)
             self.initialise_picamera()
 
     @thing_action
