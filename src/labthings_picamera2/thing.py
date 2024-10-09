@@ -634,6 +634,25 @@ class StreamingPiCamera2(Thing):
         self.calibrate_colour_correction(value)
 
     @thing_action
+    def reset_ccm(
+        self
+        ):
+        """Overwrite the colour correction matrix in camera tuning with default values from the documentation
+        """
+        c = [
+            1.80439,
+            -0.73699,
+            -0.06739,
+            -0.36073,
+            1.83327,
+            -0.47255,
+            -0.08378,
+            -0.56403,
+            1.64781
+            ]
+        self.colour_correction_matrix = c
+
+    @thing_action
     def calibrate_colour_correction(
         self,
         c: tuple
