@@ -424,6 +424,29 @@ def set_static_lst(
     ]
     alsc["luminance_lut"] = np.reshape(luminance, (-1)).round(3).tolist()
 
+def set_static_ccm(
+    tuning: dict,
+    c: list
+) -> None:
+    """Update the `rpi.alsc` section of a camera tuning dict to use a static correcton.
+
+    `tuning` will be updated in-place to set its shading to static, and disable any
+    adaptive tweaking by the algorithm.
+    """
+    ccm = Picamera2.find_tuning_algo(tuning, "rpi.ccm")
+    ccm["ccms"] = [{
+        "ct": 2860,
+        "ccm": c
+        }
+    ]
+
+def get_static_ccm(
+    tuning: dict
+) -> None:
+    """Get the `rpi.ccm` section of a camera tuning dict
+    """
+    ccm = Picamera2.find_tuning_algo(tuning, "rpi.ccm")
+    return ccm["ccms"]
 
 def lst_is_static(tuning: dict) -> bool:
     """Whether the lens shading table is set to static"""
