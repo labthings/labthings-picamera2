@@ -36,7 +36,7 @@ class JPEGBlob(BlobOutput):
     media_type = "image/jpeg"
 
 
-class PicameraControl(PropertyDescriptor):
+class PicameraGettableControl(PropertyDescriptor):
     def __init__(
         self, control_name: str, model: type = float, description: Optional[str] = None
     ):
@@ -51,9 +51,11 @@ class PicameraControl(PropertyDescriptor):
             ret = cam.capture_metadata()[self.control_name]
             return ret
 
+class PicameraControl(PicameraGettableControl):
     def _setter(self, obj: StreamingPiCamera2, value: Any):
         with obj.picamera() as cam:
             cam.set_controls({self.control_name: value})
+
 
 
 class PicameraStreamOutput(Output):
@@ -199,16 +201,13 @@ class StreamingPiCamera2(Thing):
     exposure_time = PicameraControl(
         "ExposureTime", int, description="The exposure time in microseconds"
     )
-    colour_correction_matrix = PicameraControl(
+    colour_correction_matrix = PicameraGettableControl(
         "ColourCorrectionMatrix",
-        Optional[tuple[float, float, float, float, float, float, float, float, float]],
+        tuple[float, float, float, float, float, float, float, float, float],
     )
     @colour_correction_matrix.setter
-    def colour_correction_matrix(self, value: Optional[tuple[float, float, float, float, float, float, float, float, float]]):
-        if value is None:
-            self.reset_colour_correction_matrix()
-        else:
-            self.set_colour_correction_matrix(value)
+    def colour_correction_matrix(self, value: tuple[float, float, float, float, float, float, float, float, float]):
+        self.set_colour_correction_matrix(value)
 
     @thing_property
     def sensor_modes(self) -> list[SensorMode]:
