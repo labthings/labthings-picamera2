@@ -461,15 +461,13 @@ def index_of_algorithm(algorithms: list[dict], algorithm: str):
             return i
 
 
-def copy_alsc_section(from_tuning: dict, to_tuning: dict):
+def copy_algorithm(from_tuning: dict, to_tuning: dict, algorithm: str = "rpi.alsc"):
     """Copy the `rpi.alsc` algorithm from one tuning to another.
 
     This is done in-place, i.e. modifying to_tuning.
     """
-    from_i = index_of_algorithm(from_tuning["algorithms"], "rpi.alsc")
-    to_i = index_of_algorithm(to_tuning["algorithms"], "rpi.alsc")
-    # Please excuse the clumsy update-and-delete - this lets us use
-    # the nice Picamera2 function to find the relevant sub-dict.
+    from_i = index_of_algorithm(from_tuning["algorithms"], algorithm)
+    to_i = index_of_algorithm(to_tuning["algorithms"], algorithm)
     to_tuning["algorithms"][to_i] = from_tuning["algorithms"][from_i]
 
 

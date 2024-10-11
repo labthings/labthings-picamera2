@@ -196,10 +196,19 @@ class StreamingPiCamera2(Thing):
     lores_mjpeg_stream = MJPEGStreamDescriptor()
     analogue_gain = PicameraControl("AnalogueGain", float)
     colour_gains = PicameraControl("ColourGains", tuple[float, float])
-
     exposure_time = PicameraControl(
         "ExposureTime", int, description="The exposure time in microseconds"
     )
+    colour_correction_matrix = PicameraControl(
+        "ColourCorrectionMatrix",
+        Optional[tuple[float, float, float, float, float, float, float, float, float]],
+    )
+    @colour_correction_matrix.setter
+    def colour_correction_matrix(self, value: Optional[tuple[float, float, float, float, float, float, float, float, float]]):
+        if value is None:
+            self.reset_colour_correction_matrix()
+        else:
+            self.set_colour_correction_matrix(value)
 
     @thing_property
     def sensor_modes(self) -> list[SensorMode]:
@@ -623,43 +632,14 @@ class StreamingPiCamera2(Thing):
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
             self.initialise_picamera()
 
-    @thing_property
-    def colour_correction_matrix(self) -> tuple[float,float,float,float,float,float,float,float,float]:
-        """An alias for `colour_correction_matrix` to fit the micromanager API"""
-        return self.thing_settings.get("colour_correction_matrix", tuple(recalibrate_utils.get_static_ccm(self.tuning)[0]["ccm"]))
-
-    @colour_correction_matrix.setter  # type: ignore
-    def colour_correction_matrix(self, value):
-        self.thing_settings["colour_correction_matrix"] = value
-        self.calibrate_colour_correction(value)
-
     @thing_action
-    def reset_ccm(
-        self
-        ):
-        """Overwrite the colour correction matrix in camera tuning with default values from the documentation
-        """
-        c = [
-            1.80439,
-            -0.73699,
-            -0.06739,
-            -0.36073,
-            1.83327,
-            -0.47255,
-            -0.08378,
-            -0.56403,
-            1.64781
-            ]
-        self.colour_correction_matrix = c
-
-    @thing_action
-    def calibrate_colour_correction(
+    def set_colour_correction_matrix(
         self,
-        c: tuple
+        c: tuple[float, float, float, float, float, float, float, float, float]
         ):
         """Overwrite the colour correction matrix in camera tuning
         """
-        with self.picamera(pause_stream=True) as cam:
+        with self.picamera(pause_stream=True):
             recalibrate_utils.set_static_ccm(self.tuning, c)
             self.initialise_picamera()
 
@@ -784,7 +764,18 @@ class StreamingPiCamera2(Thing):
         by the Raspberry Pi camera.
         """
         with self.picamera(pause_stream=True):
-            recalibrate_utils.copy_alsc_section(self.default_tuning, self.tuning)
+            recalibrate_utils.copy_algorithm(self.default_tuning, self.tuning, "rpi.alsc")
+            self.initialise_picamera()
+
+    @thing_action
+    def reset_colour_correction_matrix(self):
+        """Revert to default colour correction settings
+
+        This method will restore the default colour correction matrix (that
+        changes as a function of colour temperature).
+        """
+        with self.picamera(pause_stream=True):
+            recalibrate_utils.copy_algorithm(self.default_tuning, self.tuning, "rpi.ccm")
             self.initialise_picamera()
 
     @thing_property
