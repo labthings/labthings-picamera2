@@ -3,7 +3,7 @@ import time
 
 from fastapi.testclient import TestClient
 
-from labthings_fastapi.thing_server import ThingServer
+from labthings_fastapi.server import ThingServer
 from labthings_fastapi.client import ThingClient
 from labthings_picamera2.thing import StreamingPiCamera2
 

@@ -14,13 +14,14 @@ classifiers = [
 ]
 dependencies = [
   "picamera2~=0.3.12",
-  "labthings-fastapi",
+  "labthings-fastapi>=0.0.6",
   "numpy",
+  "scipy",
 ]
 
 [project.optional-dependencies]
 dev = [
-  "labthings-fastapi[dev]"
+  "labthings-fastapi[dev,server]"
 ]
 
 [project.urls]
