@@ -221,19 +221,18 @@ class StreamingPiCamera2(Thing):
                 self._sensor_modes = cam.sensor_modes
         return self._sensor_modes
         
-    _sensor_mode: Optional[SensorModeSelector] = None
     @thing_property
     def sensor_mode(self) -> Optional[SensorModeSelector]:
         """The intended sensor mode of the camera"""
-        return self._sensor_mode
+        return self.thing_settings["sensor_mode"]
         
     @sensor_mode.setter
     def sensor_mode(self, new_mode: Optional[SensorModeSelector]):
         """Change the sensor mode used"""
-        if new_mode and not isinstance(new_mode, SensorModeSelector):
-            new_mode = SensorModeSelector(**new_mode)
+        if isinstance(new_mode, SensorModeSelector):
+            new_mode = new_mode.model_dump()
         with self.picamera(pause_stream=True):
-            self._sensor_mode = new_mode
+            self.thing_settings["sensor_mode"] = new_mode
 
 
     @thing_property
@@ -387,13 +386,10 @@ class StreamingPiCamera2(Thing):
                 if picam.started:
                     picam.stop()
                     picam.stop_encoder()  # make sure there are no other encoders going
-                sensor_mode = None
-                if self._sensor_mode:
-                    sensor_mode = self._sensor_mode.model_dump()
                 stream_config = picam.create_video_configuration(
                     main={"size": self.stream_resolution},
                     lores={"size": (320, 240), "format": "YUV420"},
-                    sensor=sensor_mode,
+                    sensor=self.thing_settings.get("sensor_mode", None),
                     controls=self.persistent_controls,
                 )
                 picam.configure(stream_config)
