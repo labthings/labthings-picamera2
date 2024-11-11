@@ -36,6 +36,10 @@ class JPEGBlob(BlobOutput):
     media_type = "image/jpeg"
 
 
+class DNGBlob(BlobOutput):
+    media_type = "image/DNG"
+
+
 class PicameraControl(PropertyDescriptor):
     def __init__(
         self, control_name: str, model: type = float, description: Optional[str] = None
@@ -502,6 +506,37 @@ class StreamingPiCamera2(Thing):
         ).encode("utf-8")
         piexif.insert(piexif.dump(exif_dict), path)
         return JPEGBlob.from_temporary_directory(folder, fname)
+    
+    
+    @thing_action
+    def capture_dng(
+        self,
+    ) -> DNGBlob:
+        """Acquire one image from the camera as a JPEG
+
+        The JPEG will be acquired using `Picamera2.capture_file`. If the
+        `resolution` parameter is `main` or `lores`, it will be captured
+        from the main preview stream, or the low-res preview stream,
+        respectively. This means the camera won't be reconfigured, and
+        the stream will not pause (though it may miss one frame).
+
+        If `full` resolution is requested, we will briefly pause the
+        MJPEG stream and reconfigure the camera to capture a full
+        resolution image.
+
+        Note that this always uses the image processing pipeline - to
+        bypass this, you must use a raw capture.
+        """
+        fname = datetime.now().strftime("%Y-%m-%d-%H%M%S.dng")
+        folder = TemporaryDirectory()
+        path = os.path.join(folder.name, fname)
+        # Low-res and main streams are running already - so we don't need
+        # to reconfigure for these
+        with self.picamera() as cam:
+            r = cam.capture_request()
+            r.save_dng(path)
+        
+        return DNGBlob.from_temporary_directory(folder, fname)
 
     @thing_action
     def grab_jpeg(
