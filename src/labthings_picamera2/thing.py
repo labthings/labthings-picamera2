@@ -92,7 +92,7 @@ class PicameraStreamOutput(Output):
         self.stream = stream
         self.portal = portal
 
-    def outputframe(self, frame, _keyframe=True, _timestamp=None):
+    def outputframe(self, frame, _keyframe=True, _timestamp=None, _packet=None, _audio=False):
         """Add a frame to the stream's ringbuffer"""
         self.stream.add_frame(frame, self.portal)
 
