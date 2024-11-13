@@ -534,7 +534,10 @@ class StreamingPiCamera2(Thing):
         # to reconfigure for these
         with self.picamera() as cam:
             r = cam.capture_request()
-            r.save_dng(path)
+            try:
+                r.save_dng(path)
+            finally:
+                r.release()
         
         return DNGBlob.from_temporary_directory(folder, fname)
 
