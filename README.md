@@ -8,13 +8,28 @@ Thing Description at the camera's root (usually `/camera/`).
 
 ## Installation
 
-The package is on PyPI and can be installed using `pip install labthings-picamera2`. Note that
-you may need to separately install `pip install labthings-fastapi[server]`. The package
-can also be installed from a clone of this repository with `pip install -e .`.
+For this to work you should be on a 32-bit version of Bullseye or Bookworm os with python v3.9 or 3.11.
 
 It's usually best to install in a virtual environment, but note that you should use
-`python -m venv .venv --system-site-packages` as the `picamera2` package and its 
-dependencies are not all installable using `pip`.
+
+    python -m venv .venv --system-site-packages
+
+as the `picamera2` package and its dependencies are not all installable using `pip`.
+
+The package is on PyPI and can be installed using
+
+    pip install labthings-picamera2
+
+You will also need to separately install the server with:
+
+    pip install labthings-fastapi[server]
+    
+    
+If you want to edit labthings-picamera2 then you can clone this repository. Move to the directory and run
+
+    pip install -e .
+
+
 
 ## Usage
 
