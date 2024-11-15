@@ -431,6 +431,26 @@ def lst_is_static(tuning: dict) -> bool:
     return alsc["n_iter"] == 0
 
 
+def set_static_geq(
+    tuning: dict
+) -> None:
+    """Update the `rpi.geq` section of a camera tuning dict to always use green
+    equalisation that averages the green pixels in the red and blue rows.
+
+    `tuning` will be updated in-place to set the geq offest to the maximum. This means
+    the brightness will always be below the threshold where averaging is used.
+    """
+
+    geq = Picamera2.find_tuning_algo(tuning, "rpi.geq")
+    geq["offset"] = 65535  # max out offset to disable the adaptive green equalisation
+
+
+def _geq_is_static(tuning: dict) -> bool:
+    """Whether the green equalisation is set to static"""
+    geq = Picamera2.find_tuning_algo(tuning, "rpi.geq")
+    return alsc["offset"] == 65535
+
+
 def index_of_algorithm(algorithms: list[dict], algorithm: str):
     """Find the index of an algorithm's section in the tuning file"""
     for i, a in enumerate(algorithms):
@@ -483,6 +503,7 @@ if __name__ == "__main__":
         tuning = load_default_tuning(cam)
     f = np.ones((12, 16))
     set_static_lst(tuning, f, f, f)
+    set_static_geq(tuning)
     with Picamera2(tuning=tuning) as cam:
         cam.start_preview()
         time.sleep(3)
