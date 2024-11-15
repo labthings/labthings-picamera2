@@ -90,6 +90,11 @@ class SensorMode(BaseModel):
     format: Annotated[str, BeforeValidator(repr)]
 
 
+class SensorModeSelector(BaseModel):
+    output_size: tuple[int, int]
+    bit_depth: int
+
+
 class LensShading(BaseModel):
     luminance: list[list[float]]
     Cr: list[list[float]]
@@ -201,11 +206,28 @@ class StreamingPiCamera2(Thing):
         "ExposureTime", int, description="The exposure time in microseconds"
     )
 
+    _sensor_modes = None
     @thing_property
     def sensor_modes(self) -> list[SensorMode]:
         """All the available modes the current sensor supports"""
-        with self.picamera() as cam:
-            return cam.sensor_modes
+        if not self._sensor_modes:
+            with self.picamera() as cam:
+                self._sensor_modes = cam.sensor_modes
+        return self._sensor_modes
+        
+    @thing_property
+    def sensor_mode(self) -> Optional[SensorModeSelector]:
+        """The intended sensor mode of the camera"""
+        return self.thing_settings["sensor_mode"]
+        
+    @sensor_mode.setter
+    def sensor_mode(self, new_mode: Optional[SensorModeSelector]):
+        """Change the sensor mode used"""
+        if isinstance(new_mode, SensorModeSelector):
+            new_mode = new_mode.model_dump()
+        with self.picamera(pause_stream=True):
+            self.thing_settings["sensor_mode"] = new_mode
+
 
     @thing_property
     def sensor_resolution(self) -> tuple[int, int]:
@@ -293,6 +315,7 @@ class StreamingPiCamera2(Thing):
         self.populate_default_tuning()
         self.initialise_tuning()
         self.initialise_picamera()
+        self.sensor_modes
         self.settings_to_persistent_controls()
         self.settings_to_properties()
         self.start_streaming()
@@ -360,6 +383,7 @@ class StreamingPiCamera2(Thing):
                 stream_config = picam.create_video_configuration(
                     main={"size": self.stream_resolution},
                     lores={"size": (320, 240), "format": "YUV420"},
+                    sensor=self.thing_settings.get("sensor_mode", None),
                     controls=self.persistent_controls,
                 )
                 picam.configure(stream_config)
