@@ -686,6 +686,21 @@ class StreamingPiCamera2(Thing):
         with self.picamera(pause_stream=True) as cam:
             recalibrate_utils.set_static_ccm(self.tuning, c)
             self.initialise_picamera()
+    
+    @thing_action
+    def set_static_green_equalisation(self, offset: int = 65535):
+        """Set the green equalisation to a static value.
+        
+        Green equalisation avoids the debayering algorithm becoming confused
+        by the two green channels having different values, which is a problem
+        when the chief ray angle isn't what the sensor was designed for, and
+        that's the case in e.g. a microscope using camera module v2.
+        
+        A value of 0 here does nothing, a value of 65535 is maximum correction.
+        """
+        with self.picamera(pause_stream=True) as cam:
+            recalibrate_utils.set_static_green_equalisation(cam, offset)
+            self.initialise_picamera()
 
     @thing_action
     def full_auto_calibrate(self):
