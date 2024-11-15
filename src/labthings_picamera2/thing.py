@@ -295,15 +295,6 @@ class StreamingPiCamera2(Thing):
                 print("gc.collect()")
                 gc.collect()
                 Picamera2._cm = picamera2.picamera2.CameraManager()
-                m = libcamera.CameraManager.singleton()
-                print("libcamera.CameraManager.singleton().restart()")
-                try:
-                    m.restart()
-                except AttributeError:
-                    logging.error(
-                        "libcamera.CameraManager nas no attribute `restart`, you probably "
-                        "need to install the patched fork of `pylibcamera`"
-                    )
             print("[re]creating Picamera2 object")
             self._picamera = picamera2.Picamera2(
                 camera_num=self.camera_num,
