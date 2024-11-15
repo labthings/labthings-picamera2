@@ -699,7 +699,7 @@ class StreamingPiCamera2(Thing):
         A value of 0 here does nothing, a value of 65535 is maximum correction.
         """
         with self.picamera(pause_stream=True) as cam:
-            recalibrate_utils.set_static_green_equalisation(cam, offset)
+            recalibrate_utils.set_static_geq(self.tuning, offset)
             self.initialise_picamera()
 
     @thing_action
