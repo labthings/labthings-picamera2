@@ -3,8 +3,7 @@ Functions to set up a Raspberry Pi Camera v2 for scientific use
 
 This module provides slower, simpler functions to set the
 gain, exposure, and white balance of a Raspberry Pi camera, using
-`picamerax` (a fork of `picamera`) to get as-manual-as-possible
-control over the camera.  It's mostly used by the OpenFlexure
+the `picamera2` Python library.  It's mostly used by the OpenFlexure
 Microscope, though it deliberately has no hard dependencies on
 said software, so that it's useful on its own.
 
@@ -22,7 +21,7 @@ pipeline, is to use raw images.  This is quite slow, but very
 reliable.  The three steps above can be accomplished by:
 
 ```
-picamera = picamerax.PiCamera()
+picamera = picamera2.Picamera2()
 
 adjust_shutter_and_gain_from_raw(picamera)
 adjust_white_balance_from_raw(picamera)
