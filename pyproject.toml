@@ -1,6 +1,6 @@
 [project]
 name = "labthings-picamera2"
-version = "0.0.1-dev1"
+version = "0.0.1-dev2"
 authors = [
   { name="Richard Bowman", email="richard.bowman@cantab.net" },
 ]
