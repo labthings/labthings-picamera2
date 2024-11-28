@@ -1,5 +1,4 @@
 import logging
-import time
 
 from fastapi.testclient import TestClient
 import numpy as np
@@ -22,7 +21,6 @@ def test_sensor_mode():
             client.sensor_mode = {"output_size": size, "bit_depth": 10}
             arr = np.array(client.capture_array(stream_name="raw"))
             assert arr.shape[0] == size[1]
-
 
 
 if __name__ == "__main__":
