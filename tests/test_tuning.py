@@ -1,14 +1,20 @@
 import os
 from picamera2 import Picamera2
+from labthings_picamera2 import recalibrate_utils
 
 import pytest
 
 
+MODEL = Picamera2.global_camera_info()[0]['Model']
+
+
+def check_camera_available():
+    assert len(Picamera2.global_camera_info()) >= 1
+
+
 def load_default_tuning():
-    with Picamera2() as cam:
-        cp = cam.camera_properties
-        fname = f"{cp['Model']}.json"
-        return cam.load_tuning_file(fname)
+    fname = f"{MODEL}.json"
+    return Picamera2.load_tuning_file(fname)
 
 
 def generate_bad_tuning():
@@ -39,6 +45,7 @@ def _test_bad_tuning_after_good_tuning(configure):
         if configure:
             cam.configure(cam.create_preview_configuration())
     del cam
+    recalibrate_utils.recreate_camera_manager()
     print(f"Opening camera with tuning['version'] = {bad_tuning['version']}")
     with pytest.raises(IndexError):
         # The bad version should cause a problem
@@ -46,6 +53,12 @@ def _test_bad_tuning_after_good_tuning(configure):
         print_tuning()
         print("Success (not expected)!")
         del cam
+    recalibrate_utils.recreate_camera_manager()
+    with Picamera2(tuning=default_tuning) as cam:
+        # Reload the camera with working tuning, or it will stop responding
+        # and fail future tests
+        pass
+    del cam
 
 
 @pytest.mark.filterwarnings("ignore: Exception ignored")

@@ -1,6 +1,5 @@
 from __future__ import annotations
 from datetime import datetime
-import gc
 import json
 import logging
 import os
@@ -18,7 +17,7 @@ from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
 from labthings_fastapi.dependencies.metadata import GetThingStates
 from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
-from labthings_fastapi.outputs.blob import BlobOutput
+from labthings_fastapi.outputs.blob import blob_type
 from typing import Annotated, Any, Iterator, Literal, Mapping, Optional
 from contextlib import contextmanager
 import piexif
@@ -27,13 +26,11 @@ import picamera2
 from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder
 from picamera2.outputs import Output
-import libcamera
 import numpy as np
 from . import recalibrate_utils
 
 
-class JPEGBlob(BlobOutput):
-    media_type = "image/jpeg"
+JPEGBlob = blob_type("image/jpeg")
 
 
 class PicameraControl(PropertyDescriptor):
@@ -155,7 +152,9 @@ class StreamingPiCamera2(Thing):
                             )
                             continue  # Ignore small changes, to avoid drift
                     self.persistent_controls[k] = v
-        self.thing_settings.update(self.persistent_controls)  # TODO: Is this saving to the wrong place?
+        self.thing_settings.update(
+            self.persistent_controls
+        )  # TODO: Is this saving to the wrong place?
 
     def settings_to_persistent_controls(self):
         """Update the persistent controls dict from the settings dict
@@ -207,6 +206,7 @@ class StreamingPiCamera2(Thing):
     )
 
     _sensor_modes = None
+
     @thing_property
     def sensor_modes(self) -> list[SensorMode]:
         """All the available modes the current sensor supports"""
@@ -214,12 +214,12 @@ class StreamingPiCamera2(Thing):
             with self.picamera() as cam:
                 self._sensor_modes = cam.sensor_modes
         return self._sensor_modes
-        
+
     @thing_property
     def sensor_mode(self) -> Optional[SensorModeSelector]:
         """The intended sensor mode of the camera"""
         return self.thing_settings["sensor_mode"]
-        
+
     @sensor_mode.setter
     def sensor_mode(self, new_mode: Optional[SensorModeSelector]):
         """Change the sensor mode used"""
@@ -227,7 +227,6 @@ class StreamingPiCamera2(Thing):
             new_mode = new_mode.model_dump()
         with self.picamera(pause_stream=True):
             self.thing_settings["sensor_mode"] = new_mode
-
 
     @thing_property
     def sensor_resolution(self) -> tuple[int, int]:
@@ -290,11 +289,7 @@ class StreamingPiCamera2(Thing):
                 self._picamera.close()
                 print("closed, deleting picamera")
                 del self._picamera
-                print("deleting Picamera2._cm")
-                del Picamera2._cm
-                print("gc.collect()")
-                gc.collect()
-                Picamera2._cm = picamera2.picamera2.CameraManager()
+                recalibrate_utils.recreate_camera_manager()
             print("[re]creating Picamera2 object")
             self._picamera = picamera2.Picamera2(
                 camera_num=self.camera_num,
@@ -525,12 +520,16 @@ class StreamingPiCamera2(Thing):
         stream (either "main" for the preview stream, or "lores" for the low
         resolution preview). No metadata is returned.
         """
-        logging.info(f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) starting")
+        logging.info(
+            f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) starting"
+        )
         stream = (
             self.lores_mjpeg_stream if stream_name == "lores" else self.mjpeg_stream
         )
         frame = portal.call(stream.grab_frame)
-        logging.info(f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame")
+        logging.info(
+            f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame"
+        )
         return JPEGBlob.from_bytes(frame)
 
     @thing_action
@@ -597,7 +596,7 @@ class StreamingPiCamera2(Thing):
     ):
         """Correct the white balance of the image
 
-        This calibration requires a neutral image, such that the 99th centile 
+        This calibration requires a neutral image, such that the 99th centile
         of each colour channel should correspond to white. We calculate the
         centiles and use this to set the colour gains. This is done on the raw
         image with the lens shading correction applied, which should mean
@@ -611,12 +610,12 @@ class StreamingPiCamera2(Thing):
                 lst: LensShading = self.lens_shading_tables
                 recalibrate_utils.adjust_white_balance_from_raw(
                     cam,
-                    percentile = 99,
-                    luminance = lst.luminance,
-                    Cr = lst.Cr,
-                    Cb = lst.Cb,
-                    luminance_power = luminance_power,
-                    method = method,
+                    percentile=99,
+                    luminance=lst.luminance,
+                    Cr=lst.Cr,
+                    Cb=lst.Cb,
+                    luminance_power=luminance_power,
+                    method=method,
                 )
             else:
                 recalibrate_utils.adjust_white_balance_from_raw(
@@ -639,9 +638,14 @@ class StreamingPiCamera2(Thing):
             self.initialise_picamera()
 
     @thing_property
-    def colour_correction_matrix(self) -> tuple[float,float,float,float,float,float,float,float,float]:
+    def colour_correction_matrix(
+        self,
+    ) -> tuple[float, float, float, float, float, float, float, float, float]:
         """An alias for `colour_correction_matrix` to fit the micromanager API"""
-        return self.thing_settings.get("colour_correction_matrix", tuple(recalibrate_utils.get_static_ccm(self.tuning)[0]["ccm"]))
+        return self.thing_settings.get(
+            "colour_correction_matrix",
+            tuple(recalibrate_utils.get_static_ccm(self.tuning)[0]["ccm"]),
+        )
 
     @colour_correction_matrix.setter  # type: ignore
     def colour_correction_matrix(self, value):
@@ -649,11 +653,8 @@ class StreamingPiCamera2(Thing):
         self.calibrate_colour_correction(value)
 
     @thing_action
-    def reset_ccm(
-        self
-        ):
-        """Overwrite the colour correction matrix in camera tuning with default values from the documentation
-        """
+    def reset_ccm(self):
+        """Overwrite the colour correction matrix in camera tuning with default values from the documentation"""
         c = [
             1.80439,
             -0.73699,
@@ -663,33 +664,29 @@ class StreamingPiCamera2(Thing):
             -0.47255,
             -0.08378,
             -0.56403,
-            1.64781
-            ]
+            1.64781,
+        ]
         self.colour_correction_matrix = c
 
     @thing_action
-    def calibrate_colour_correction(
-        self,
-        c: tuple
-        ):
-        """Overwrite the colour correction matrix in camera tuning
-        """
-        with self.picamera(pause_stream=True) as cam:
+    def calibrate_colour_correction(self, c: tuple):
+        """Overwrite the colour correction matrix in camera tuning"""
+        with self.picamera(pause_stream=True):
             recalibrate_utils.set_static_ccm(self.tuning, c)
             self.initialise_picamera()
-    
+
     @thing_action
     def set_static_green_equalisation(self, offset: int = 65535):
         """Set the green equalisation to a static value.
-        
+
         Green equalisation avoids the debayering algorithm becoming confused
         by the two green channels having different values, which is a problem
         when the chief ray angle isn't what the sensor was designed for, and
         that's the case in e.g. a microscope using camera module v2.
-        
+
         A value of 0 here does nothing, a value of 65535 is maximum correction.
         """
-        with self.picamera(pause_stream=True) as cam:
+        with self.picamera(pause_stream=True):
             recalibrate_utils.set_static_geq(self.tuning, offset)
             self.initialise_picamera()
 
