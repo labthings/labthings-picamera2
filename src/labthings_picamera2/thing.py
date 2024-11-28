@@ -18,7 +18,7 @@ from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
 from labthings_fastapi.dependencies.metadata import GetThingStates
 from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
-from labthings_fastapi.outputs.blob import BlobOutput
+from labthings_fastapi.outputs.blob import blob_type
 from typing import Annotated, Any, Iterator, Literal, Mapping, Optional
 from contextlib import contextmanager
 import piexif
@@ -32,8 +32,7 @@ import numpy as np
 from . import recalibrate_utils
 
 
-class JPEGBlob(BlobOutput):
-    media_type = "image/jpeg"
+JPEGBlob = blob_type("image/jpeg")
 
 
 class PicameraControl(PropertyDescriptor):

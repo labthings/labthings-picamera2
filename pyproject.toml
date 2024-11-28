@@ -14,7 +14,7 @@ classifiers = [
 ]
 dependencies = [
   "picamera2~=0.3.12",
-  "labthings-fastapi>=0.0.6",
+  "labthings-fastapi>=0.0.7",
   "numpy",
   "scipy",
 ]
