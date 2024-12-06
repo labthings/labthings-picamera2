@@ -31,8 +31,25 @@ def test_jpeg_and_array(client):
     assert array_main.shape[1::-1] == jpeg_capture.size
 
 def test_raw_and_processed(client):
-    #params = client.prepare_image_normalisation()
     raw = client.capture_raw()
-    blob = client.raw_to_png(raw=raw) #, parameters=params)
+    blob = client.raw_to_png(raw=raw)
     img = Image.open(blob.open())
     print(img.size)
+
+def test_raw_with_cache(client):
+    #params = client.prepare_image_normalisation()
+    inputs = client.image_processing_inputs
+    client.prepare_image_normalisation(inputs=inputs)
+    raws = [
+        client.capture_raw(get_processing_inputs=False, get_states=False)
+        for _ in range(3)
+    ]
+    blobs = [
+        client.raw_to_png(raw=raw, use_cache=True)
+        for raw in raws
+    ]
+    for blob in blobs:
+        img = Image.open(blob.open())
+        expected_size = (
+            d//2 for d in inputs["raw_size"]
+        )

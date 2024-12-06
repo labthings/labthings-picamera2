@@ -1,4 +1,5 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from datetime import datetime
 import io
 import json
@@ -51,6 +52,7 @@ class RawImageModel(BaseModel):
     image_data: RawBlob
     thing_states: Optional[Mapping[str, Mapping]]
     metadata: Optional[Mapping[str, Mapping]]
+    processing_inputs: Optional[ImageProcessingInputs] = None
     size: tuple[int, int]
     stride: int
     format: str
@@ -120,12 +122,20 @@ class LensShading(BaseModel):
     Cb: list[list[float]]
 
 
-class ImageProcessingParameters(BaseModel):
+class ImageProcessingInputs(BaseModel):
     lens_shading: LensShading
     colour_gains: tuple[float, float]
+    white_norm_lores: NDArray
+    raw_size: tuple[int, int]
     colour_correction_matrix: tuple[float, float, float, float, float, float, float, float, float]
-    gamma: list[list[int]]
-    white_norm: NDArray
+    gamma: NDArray
+
+
+@dataclass
+class ImageProcessingCache:
+    white_norm: np.ndarray
+    gamma: interp1d
+    ccm: np.ndarray
 
 
 class BlobNumpyDict(BlobBytes): 
@@ -533,6 +543,7 @@ class StreamingPiCamera2(Thing):
         self,
         states_getter: GetThingStates,
         get_states: bool=True,
+        get_processing_inputs: bool=True,
     ) -> RawImageModel:
         """Capture a raw image
         
@@ -551,14 +562,17 @@ class StreamingPiCamera2(Thing):
             image_data = RawBlob.from_bytes(buffer.tobytes()),
             thing_states = states_getter() if get_states else None,
             metadata = { "parameters": parameters, "sensor": configuration["sensor"] },
+            processing_inputs = (
+                self.image_processing_inputs if get_processing_inputs else None
+            ),
             size = configuration["raw"]["size"],
             format = configuration["raw"]["format"],
             stride = configuration["raw"]["stride"],
         )
 
-    @thing_action
-    def prepare_image_normalisation(self) -> ImageProcessingParameters:
-        """The parameters used to convert raw image data into processed images"""
+    @thing_property
+    def image_processing_inputs(self) -> ImageProcessingInputs:
+        """The information needed to turn raw images into processed ones"""
         lst = self.lens_shading_tables
         lum = np.array(lst.luminance)
         Cr = np.array(lst.Cr)
@@ -574,48 +588,91 @@ class StreamingPiCamera2(Thing):
         with self.picamera() as cam:
             size: tuple[int, int] = cam.camera_configuration()["raw"]["size"]
 
-        zoom_factors = [
-            i / 2 / n for i, n in zip(size[::-1], white_norm_lores.shape[:2])
-        ] + [1]
-        white_norm = zoom(white_norm_lores, zoom_factors, order=1)[
-            : (size[1]//2), : (size[0]//2), :
-        ]  # Could use some work
-
         contrast_algorithm = Picamera2.find_tuning_algo(self.tuning, "rpi.contrast")
         gamma = np.array(contrast_algorithm["gamma_curve"]).reshape((-1, 2))
-        gamma_list: list[list[int]] = gamma.tolist()
-        return ImageProcessingParameters(
-            lens_shading = lst,
-            colour_gains = self.colour_gains,
-            colour_correction_matrix = self.colour_correction_matrix,
-            gamma = gamma_list,
-            white_norm = white_norm,
+
+        return ImageProcessingInputs(
+            lens_shading=lst,
+            colour_gains=(gr, gb),
+            colour_correction_matrix=self.colour_correction_matrix,
+            white_norm_lores=white_norm_lores,
+            raw_size=size,
+            gamma=gamma,
         )
 
-    @thing_action
-    def process_raw_array(self, raw: RawImageModel, parameters: Optional[ImageProcessingParameters]=None)->NDArray:
-        """Convert a raw image to a processed array"""
-        p = parameters or self.prepare_image_normalisation()
-        assert raw.format == "SBGGR10_CSI2P"
+    @staticmethod
+    def generate_image_processing_cache(
+        p: ImageProcessingInputs,
+    ) -> ImageProcessingCache:
+        """Prepare to process raw images
+        
+        This is a static method to ensure its outputs depend only on its
+        inputs."""
+        zoom_factors = [
+            i / 2 / n for i, n in zip(p.raw_size[::-1], p.white_norm_lores.shape[:2])
+        ] + [1]
+        white_norm = zoom(p.white_norm_lores, zoom_factors, order=1)[
+            : (p.raw_size[1]//2), : (p.raw_size[0]//2), :
+        ]
         ccm = np.array(p.colour_correction_matrix).reshape((3,3))
-        gamma = np.array(p.gamma)
-        gamma_8bit = interp1d(gamma[:, 0] / 255, gamma[:, 1] / 255)
+        gamma = interp1d(p.gamma[:, 0] / 255, p.gamma[:, 1] / 255)
+        return ImageProcessingCache(
+            white_norm=white_norm,
+            ccm = ccm,
+            gamma = gamma,
+        )
+
+    _image_processing_cache: ImageProcessingCache | None = None
+    @thing_action
+    def prepare_image_normalisation(
+        self,
+        inputs: ImageProcessingInputs | None = None
+    ) -> ImageProcessingInputs:
+        """The parameters used to convert raw image data into processed images
+        
+        NB this method uses only information from `inputs` or 
+        `self.image_processing_inputs`, to ensure repeatability
+        """
+        p = inputs or self.image_processing_inputs
+        self._image_processing_cache = self.generate_image_processing_cache(p)
+        return p
+
+    @thing_action
+    def process_raw_array(
+        self,
+        raw: RawImageModel,
+        use_cache: bool = False,
+    )->NDArray:
+        """Convert a raw image to a processed array"""
+        if not use_cache:
+            if raw.processing_inputs is None:
+                raise ValueError(
+                    "The raw image does not contain processing inputs, "
+                    "and we are not using the cache. This may be solved by "
+                    "capturing with `get_processing_inputs=True`."
+                )
+            self.prepare_image_normalisation(
+                raw.processing_inputs
+            )
+        p = self._image_processing_cache
+        assert p is not None
+        assert raw.format == "SBGGR10_CSI2P"
         buffer = np.frombuffer(raw.image_data.content, dtype=np.uint8)
         packed = buffer.reshape((-1, raw.stride))
         rgb = rggb2rgb(raw2rggb(packed, raw.size))
         normed = rgb / p.white_norm
         corrected = np.dot(
-            ccm, normed.reshape((-1, 3)).T
+            p.ccm, normed.reshape((-1, 3)).T
         ).T.reshape(normed.shape)
         corrected[corrected < 0] = 0
         corrected[corrected > 255] = 255
-        processed_image = gamma_8bit(corrected)
-        return processed_image
+        processed_image = p.gamma(corrected)
+        return processed_image.astype(np.uint8)
 
     @thing_action
-    def raw_to_png(self, raw: RawImageModel, parameters: Optional[ImageProcessingParameters]=None)->PNGBlob:
+    def raw_to_png(self, raw: RawImageModel, use_cache: bool = False)->PNGBlob:
         """Process a raw image to a PNG"""
-        arr = self.process_raw_array(raw=raw, parameters=parameters)
+        arr = self.process_raw_array(raw=raw, use_cache=use_cache)
         image = Image.fromarray(arr.astype(np.uint8), mode="RGB")
         out = io.BytesIO()
         image.save(out, format="png")
