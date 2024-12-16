@@ -756,14 +756,14 @@ class StreamingPiCamera2(Thing):
         stream (either "main" for the preview stream, or "lores" for the low
         resolution preview). No metadata is returned.
         """
-        logging.info(
+        logging.debug(
             f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) starting"
         )
         stream = (
             self.lores_mjpeg_stream if stream_name == "lores" else self.mjpeg_stream
         )
         frame = portal.call(stream.grab_frame)
-        logging.info(
+        logging.debug(
             f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame"
         )
         return JPEGBlob.from_bytes(frame)
