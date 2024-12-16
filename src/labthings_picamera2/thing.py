@@ -1,11 +1,14 @@
 from __future__ import annotations
+from dataclasses import dataclass
 from datetime import datetime
+import io
 import json
 import logging
 import os
 import tempfile
 import time
 from tempfile import TemporaryDirectory
+import uuid
 
 from pydantic import BaseModel, BeforeValidator, RootModel
 
@@ -17,10 +20,13 @@ from labthings_fastapi.utilities import get_blocking_portal
 from labthings_fastapi.types.numpy import NDArray
 from labthings_fastapi.dependencies.metadata import GetThingStates
 from labthings_fastapi.dependencies.blocking_portal import BlockingPortal
-from labthings_fastapi.outputs.blob import blob_type
-from typing import Annotated, Any, Iterator, Literal, Mapping, Optional
+from labthings_fastapi.outputs.blob import Blob, BlobBytes
+from typing import Annotated, Any, Iterator, Literal, Mapping, Optional, Self
 from contextlib import contextmanager
 import piexif
+from scipy.ndimage import zoom
+from scipy.interpolate import interp1d
+from PIL import Image
 from threading import RLock
 import picamera2
 from picamera2 import Picamera2
@@ -30,8 +36,26 @@ import numpy as np
 from . import recalibrate_utils
 
 
-JPEGBlob = blob_type("image/jpeg")
+class JPEGBlob(Blob):
+    media_type: str = "image/jpeg"
 
+
+class PNGBlob(Blob):
+    media_type: str = "image/png"
+
+
+class RawBlob(Blob):
+    media_type: str = "image/raw"
+
+
+class RawImageModel(BaseModel):
+    image_data: RawBlob
+    thing_states: Optional[Mapping[str, Mapping]]
+    metadata: Optional[Mapping[str, Mapping]]
+    processing_inputs: Optional[ImageProcessingInputs] = None
+    size: tuple[int, int]
+    stride: int
+    format: str
 
 class PicameraControl(PropertyDescriptor):
     def __init__(
@@ -68,7 +92,7 @@ class PicameraStreamOutput(Output):
         self.stream = stream
         self.portal = portal
 
-    def outputframe(self, frame, _keyframe=True, _timestamp=None):
+    def outputframe(self, frame, _keyframe=True, _timestamp=None, _packet=None, _audio=False):
         """Add a frame to the stream's ringbuffer"""
         self.stream.add_frame(frame, self.portal)
 
@@ -96,6 +120,78 @@ class LensShading(BaseModel):
     luminance: list[list[float]]
     Cr: list[list[float]]
     Cb: list[list[float]]
+
+
+class ImageProcessingInputs(BaseModel):
+    lens_shading: LensShading
+    colour_gains: tuple[float, float]
+    white_norm_lores: NDArray
+    raw_size: tuple[int, int]
+    colour_correction_matrix: tuple[float, float, float, float, float, float, float, float, float]
+    gamma: NDArray
+
+
+@dataclass
+class ImageProcessingCache:
+    white_norm: np.ndarray
+    gamma: interp1d
+    ccm: np.ndarray
+
+
+class BlobNumpyDict(BlobBytes): 
+    def __init__(self, arrays: Mapping[str, np.ndarray]):
+        self._arrays = arrays
+        self._bytesio: Optional[io.BytesIO] = None
+        self.media_type = "application/npz"
+
+    @property
+    def arrays(self) -> Mapping[str, np.ndarray]:
+        return self._arrays
+
+    @property
+    def _bytes(self) -> bytes: #noqa mypy: override
+        """Generate binary content on-the-fly from numpy data"""
+        if not self._bytesio:
+            out = io.BytesIO()
+            np.savez(out, **self.arrays)
+            self._bytes_cache = out.getvalue()
+        return self._bytes_cache
+
+
+class NumpyBlob(Blob):
+    media_type: str = "application/npz"
+
+    @classmethod
+    def from_arrays(cls, arrays: Mapping[str, np.ndarray]) -> Self:
+        return cls.model_construct(  # type: ignore[return-value]
+            href="blob://local",
+            _data=BlobNumpyDict(
+                arrays,
+                media_type=cls.default_media_type()
+            ),
+        )
+
+
+
+def raw2rggb(raw: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Convert packed 10 bit raw to RGGB 8 bit"""
+    raw = np.asarray(raw)  # ensure it's an array
+    output_shape = (size[1]//2, size[0]//2, 4)
+    rggb = np.empty(output_shape, dtype=np.uint8)
+    raw_w = rggb.shape[1] // 2 * 5
+    for plane, offset in enumerate([(1, 1), (0, 1), (1, 0), (0, 0)]):
+        rggb[:, ::2, plane] = raw[offset[0] :: 2, offset[1] : raw_w + offset[1] : 5]
+        rggb[:, 1::2, plane] = raw[
+            offset[0] :: 2, offset[1] + 2 : raw_w + offset[1] + 2 : 5
+        ]
+    return rggb
+
+
+def rggb2rgb(rggb: np.ndarray) -> np.ndarray:
+    """Convert rggb to rgb by averaging green channels"""
+    return np.stack(
+        [rggb[..., 0], rggb[..., 1] // 2 + rggb[..., 2] // 2, rggb[..., 3]], axis=2
+    )
 
 
 class StreamingPiCamera2(Thing):
@@ -441,6 +537,146 @@ class StreamingPiCamera2(Thing):
         """
         with self.picamera() as cam:
             return cam.capture_array(stream_name)
+
+    @thing_action
+    def capture_raw(
+        self,
+        states_getter: GetThingStates,
+        get_states: bool=True,
+        get_processing_inputs: bool=True,
+    ) -> RawImageModel:
+        """Capture a raw image
+        
+        This function is intended to be as fast as possible, and will return
+        as soon as an image has been captured. The output format is not intended
+        to be useful, except as input to `raw_to_png`. 
+        
+        When used via the HTTP interface, this function returns the data as a
+        `Blob` object, meaning it can be passed to another action without
+        transferring it over the network.
+        """
+        with self.picamera() as cam:
+            (buffer, ), parameters = cam.capture_buffers(["raw"])
+            configuration = cam.camera_configuration()
+        return RawImageModel(
+            image_data = RawBlob.from_bytes(buffer.tobytes()),
+            thing_states = states_getter() if get_states else None,
+            metadata = { "parameters": parameters, "sensor": configuration["sensor"] },
+            processing_inputs = (
+                self.image_processing_inputs if get_processing_inputs else None
+            ),
+            size = configuration["raw"]["size"],
+            format = configuration["raw"]["format"],
+            stride = configuration["raw"]["stride"],
+        )
+
+    @thing_property
+    def image_processing_inputs(self) -> ImageProcessingInputs:
+        """The information needed to turn raw images into processed ones"""
+        lst = self.lens_shading_tables
+        lum = np.array(lst.luminance)
+        Cr = np.array(lst.Cr)
+        Cb = np.array(lst.Cb)
+        gr, gb = self.colour_gains
+        G = 1 / lum
+        R = (
+            G / Cr / gr * np.min(Cr)
+        )  # The extra /np.max(Cr) emulates the quirky handling of Cr in
+        B = G / Cb / gb * np.min(Cb)  # the picamera2 pipeline
+        white_norm_lores = np.stack([R, G, B], axis=2)
+
+        with self.picamera() as cam:
+            size: tuple[int, int] = cam.camera_configuration()["raw"]["size"]
+
+        contrast_algorithm = Picamera2.find_tuning_algo(self.tuning, "rpi.contrast")
+        gamma = np.array(contrast_algorithm["gamma_curve"]).reshape((-1, 2))
+
+        return ImageProcessingInputs(
+            lens_shading=lst,
+            colour_gains=(gr, gb),
+            colour_correction_matrix=self.colour_correction_matrix,
+            white_norm_lores=white_norm_lores,
+            raw_size=size,
+            gamma=gamma,
+        )
+
+    @staticmethod
+    def generate_image_processing_cache(
+        p: ImageProcessingInputs,
+    ) -> ImageProcessingCache:
+        """Prepare to process raw images
+        
+        This is a static method to ensure its outputs depend only on its
+        inputs."""
+        zoom_factors = [
+            i / 2 / n for i, n in zip(p.raw_size[::-1], p.white_norm_lores.shape[:2])
+        ] + [1]
+        white_norm = zoom(p.white_norm_lores, zoom_factors, order=1)[
+            : (p.raw_size[1]//2), : (p.raw_size[0]//2), :
+        ]
+        ccm = np.array(p.colour_correction_matrix).reshape((3,3))
+        gamma = interp1d(p.gamma[:, 0] / 255, p.gamma[:, 1] / 255)
+        return ImageProcessingCache(
+            white_norm=white_norm,
+            ccm = ccm,
+            gamma = gamma,
+        )
+
+    _image_processing_cache: ImageProcessingCache | None = None
+    @thing_action
+    def prepare_image_normalisation(
+        self,
+        inputs: ImageProcessingInputs | None = None
+    ) -> ImageProcessingInputs:
+        """The parameters used to convert raw image data into processed images
+        
+        NB this method uses only information from `inputs` or 
+        `self.image_processing_inputs`, to ensure repeatability
+        """
+        p = inputs or self.image_processing_inputs
+        self._image_processing_cache = self.generate_image_processing_cache(p)
+        return p
+
+    @thing_action
+    def process_raw_array(
+        self,
+        raw: RawImageModel,
+        use_cache: bool = False,
+    )->NDArray:
+        """Convert a raw image to a processed array"""
+        if not use_cache:
+            if raw.processing_inputs is None:
+                raise ValueError(
+                    "The raw image does not contain processing inputs, "
+                    "and we are not using the cache. This may be solved by "
+                    "capturing with `get_processing_inputs=True`."
+                )
+            self.prepare_image_normalisation(
+                raw.processing_inputs
+            )
+        p = self._image_processing_cache
+        assert p is not None
+        assert raw.format == "SBGGR10_CSI2P"
+        buffer = np.frombuffer(raw.image_data.content, dtype=np.uint8)
+        packed = buffer.reshape((-1, raw.stride))
+        rgb = rggb2rgb(raw2rggb(packed, raw.size))
+        normed = rgb / p.white_norm
+        corrected = np.dot(
+            p.ccm, normed.reshape((-1, 3)).T
+        ).T.reshape(normed.shape)
+        corrected[corrected < 0] = 0
+        corrected[corrected > 255] = 255
+        processed_image = p.gamma(corrected)
+        return processed_image.astype(np.uint8)
+
+    @thing_action
+    def raw_to_png(self, raw: RawImageModel, use_cache: bool = False)->PNGBlob:
+        """Process a raw image to a PNG"""
+        arr = self.process_raw_array(raw=raw, use_cache=use_cache)
+        image = Image.fromarray(arr.astype(np.uint8), mode="RGB")
+        out = io.BytesIO()
+        image.save(out, format="png")
+        return PNGBlob.from_bytes(out.getvalue())
 
     @thing_property
     def camera_configuration(self) -> Mapping:
