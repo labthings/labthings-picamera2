@@ -561,7 +561,7 @@ class StreamingPiCamera2(Thing):
         return RawImageModel(
             image_data = RawBlob.from_bytes(buffer.tobytes()),
             thing_states = states_getter() if get_states else None,
-            metadata = { "parameters": parameters, "sensor": configuration["sensor"] },
+            metadata = { "parameters": parameters, "sensor": configuration["sensor"], "tuning": self.tuning },
             processing_inputs = (
                 self.image_processing_inputs if get_processing_inputs else None
             ),
