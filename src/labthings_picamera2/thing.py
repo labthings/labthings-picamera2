@@ -192,16 +192,19 @@ def raw_to_8bit_bayer(raw: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     # raw_w is Raw data width in bytes which is:
     #     pixel width * bits_per_pixel  / bits_per_byte
     # This is calculated as below because the data is saved as:
-    # [8-bit R pixel, 8-bit G pixel, 8-bit R pixel, 8-bit G pixel, extra bits]
+    # For each red line
+    # [8-bit R pixel, 8-bit G pixel, 8-bit R pixel, 8-bit G pixel, extra bits, ...]
+    # For each blue line
+    # [8-bit G pixel, 8-bit B pixel, 8-bit G pixel, 8-bit B pixel, extra bits, ...]
     # where the extra bits are the 2 bits for the previous 4 pixels
     raw_w = bayer8bit.shape[1] // 4 * 5
-    # Red
+    # First pixel in block of 5 bytes
     bayer8bit[:,::4] = raw[:, : raw_w : 5]
-    # Green 1
+    # 2nd pixel in block of 5 bytes
     bayer8bit[:,1::4] = raw[:, 1: raw_w+1 : 5]
-    # Green 2
+    # 3rd pixel in block of 5 bytes
     bayer8bit[:,2::4] = raw[:, 2: raw_w+2 : 5]
-    # Blue
+    # 4th pixel in block of 5 bytes
     bayer8bit[:,3::4] = raw[:, 3: raw_w+3 : 5]
     return bayer8bit
 
