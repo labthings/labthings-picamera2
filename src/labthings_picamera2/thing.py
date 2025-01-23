@@ -216,13 +216,13 @@ def bayer_masks(
     Return the Bayer red, green and blue masks
     """
 
-    r = np.zeros(shape, dtype="bool")
-    r[::2,::2] = 1
-    g = np.zeros(shape, dtype="bool")
+    r = np.zeros(shape)
+    r[1::2,1::2] = 1
+    g = np.zeros(shape)
     g[1::2,::2] = 1
     g[::2,1::2] = 1
-    b = np.zeros(shape, dtype="bool")
-    b[1::2,1::2] = 1
+    b = np.zeros(shape)
+    b[::2,::2] = 1
 
     return r,g,b
 
@@ -239,7 +239,7 @@ def demosaicing_bilinear(bayer8bit: np.ndarray) -> np.ndarray:
     g = convolve(bayer8bit * g_mask, GREEN_KERNEL)
     b = convolve(bayer8bit * b_mask, RED_BLUE_KERNEL)
 
-    return np.dstack((r,g,b))
+    return np.dstack((r,g,b)).astype(np.uint8)
 
 def raw2rggb(raw: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     """Convert packed 10 bit raw to RGGB 8 bit"""
