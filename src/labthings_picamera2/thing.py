@@ -24,7 +24,7 @@ from labthings_fastapi.outputs.blob import Blob, BlobBytes
 from typing import Annotated, Any, Iterator, Literal, Mapping, Optional, Self
 from contextlib import contextmanager
 import piexif
-from scipy.ndimage import zoom
+from scipy.ndimage import zoom, convolve
 from scipy.interpolate import interp1d
 from PIL import Image
 from threading import RLock
@@ -134,6 +134,7 @@ class ImageProcessingInputs(BaseModel):
 @dataclass
 class ImageProcessingCache:
     white_norm: np.ndarray
+    white_norm_bl: np.ndarray
     gamma: interp1d
     ccm: np.ndarray
 
@@ -681,10 +682,17 @@ class StreamingPiCamera2(Thing):
         white_norm = zoom(p.white_norm_lores, zoom_factors, order=1)[
             : (p.raw_size[1]//2), : (p.raw_size[0]//2), :
         ]
+        zoom_factors_bl = [
+            i / n for i, n in zip(p.raw_size[::-1], p.white_norm_lores.shape[:2])
+        ] + [1]
+        white_norm_bl = zoom(p.white_norm_lores, zoom_factors_bl, order=1)[
+            : (p.raw_size[1]), : (p.raw_size[0]), :
+        ]
         ccm = np.array(p.colour_correction_matrix).reshape((3,3))
         gamma = interp1d(p.gamma[:, 0] / 255, p.gamma[:, 1] / 255)
         return ImageProcessingCache(
             white_norm=white_norm,
+            white_norm_bl=white_norm_bl,
             ccm = ccm,
             gamma = gamma,
         )
@@ -729,9 +737,10 @@ class StreamingPiCamera2(Thing):
         packed = buffer.reshape((-1, raw.stride))
         if bilinear_demosaic:
             rgb = demosaicing_bilinear(raw_to_8bit_bayer(packed, raw.size))
+            normed = rgb / p.white_norm_bl
         else:
             rgb = rggb2rgb(raw2rggb(packed, raw.size))
-        normed = rgb / p.white_norm
+            normed = rgb / p.white_norm
         corrected = np.dot(
             p.ccm, normed.reshape((-1, 3)).T
         ).T.reshape(normed.shape)
