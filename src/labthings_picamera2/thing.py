@@ -172,6 +172,70 @@ class NumpyBlob(Blob):
         )
 
 
+GREEN_KERNEL = np.asarray(
+    [[0, 0.25, 0],
+     [0.25, 1, 0.25],
+     [0, 0.25, 0]]
+)
+
+RED_BLUE_KERNEL = np.asarray(
+    [[0.25, 0.5, 0.25],
+     [0.5, 1, 0.5],
+     [0.25, 0.5, 0.25]]
+)
+
+def raw_to_8bit_bayer(raw: np.ndarray, size: tuple[int, int]) -> np.ndarray:
+    """Convert packed 10 bit raw to 8 bit Raw bayer data"""
+    raw = np.asarray(raw)  # ensure it's an array
+    output_shape = (size[1], size[0])
+    bayer8bit = np.empty(output_shape, dtype=np.uint8)
+    # raw_w is Raw data width in bytes which is:
+    #     pixel width * bits_per_pixel  / bits_per_byte
+    # This is calculated as below because the data is saved as:
+    # [8-bit R pixel, 8-bit G pixel, 8-bit R pixel, 8-bit G pixel, extra bits]
+    # where the extra bits are the 2 bits for the previous 4 pixels
+    raw_w = bayer8bit.shape[1] // 4 * 5
+    # Red
+    bayer8bit[:,::4] = raw[:, : raw_w : 5]
+    # Green 1
+    bayer8bit[:,1::4] = raw[:, 1: raw_w+1 : 5]
+    # Green 2
+    bayer8bit[:,2::4] = raw[:, 2: raw_w+2 : 5]
+    # Blue
+    bayer8bit[:,3::4] = raw[:, 3: raw_w+3 : 5]
+    return bayer8bit
+
+def bayer_masks(
+    shape: tuple[int, int],
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Return the Bayer red, green and blue masks
+    """
+
+    r = np.zeros(shape, dtype="bool")
+    r[::2,::2] = 1
+    g = np.zeros(shape, dtype="bool")
+    g[1::2,::2] = 1
+    g[::2,1::2] = 1
+    b = np.zeros(shape, dtype="bool")
+    b[1::2,1::2] = 1
+
+    return r,g,b
+
+def demosaicing_bilinear(bayer8bit: np.ndarray) -> np.ndarray:
+    """
+    Demosaic using a bilinear algorithm taken from the library
+    colour_demosaicing
+    """
+    bayer8bit.astype(np.double)
+
+    r_mask, g_mask, b_mask = bayer_masks(bayer8bit.shape)
+
+    r = convolve(bayer8bit * r_mask, RED_BLUE_KERNEL)
+    g = convolve(bayer8bit * g_mask, GREEN_KERNEL)
+    b = convolve(bayer8bit * b_mask, RED_BLUE_KERNEL)
+
+    return np.dstack((r,g,b))
 
 def raw2rggb(raw: np.ndarray, size: tuple[int, int]) -> np.ndarray:
     """Convert packed 10 bit raw to RGGB 8 bit"""
@@ -642,6 +706,7 @@ class StreamingPiCamera2(Thing):
         self,
         raw: RawImageModel,
         use_cache: bool = False,
+        bilinear_demosaic: bool = True,
     )->NDArray:
         """Convert a raw image to a processed array"""
         if not use_cache:
@@ -659,7 +724,10 @@ class StreamingPiCamera2(Thing):
         assert raw.format == "SBGGR10_CSI2P"
         buffer = np.frombuffer(raw.image_data.content, dtype=np.uint8)
         packed = buffer.reshape((-1, raw.stride))
-        rgb = rggb2rgb(raw2rggb(packed, raw.size))
+        if bilinear_demosaic:
+            rgb = demosaicing_bilinear(raw_to_8bit_bayer(packed, raw.size))
+        else:
+            rgb = rggb2rgb(raw2rggb(packed, raw.size))
         normed = rgb / p.white_norm
         corrected = np.dot(
             p.ccm, normed.reshape((-1, 3)).T
@@ -670,9 +738,18 @@ class StreamingPiCamera2(Thing):
         return processed_image.astype(np.uint8)
 
     @thing_action
-    def raw_to_png(self, raw: RawImageModel, use_cache: bool = False)->PNGBlob:
+    def raw_to_png(
+        self,
+        raw: RawImageModel,
+        use_cache: bool = False,
+        bilinear_demosaic: bool = True,
+    )->PNGBlob:
         """Process a raw image to a PNG"""
-        arr = self.process_raw_array(raw=raw, use_cache=use_cache)
+        arr = self.process_raw_array(
+            raw=raw,
+            use_cache=use_cache,
+            bilinear_demosaic=bilinear_demosaic
+        )
         image = Image.fromarray(arr.astype(np.uint8), mode="RGB")
         out = io.BytesIO()
         image.save(out, format="png")
