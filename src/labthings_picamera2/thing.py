@@ -868,7 +868,6 @@ class StreamingPiCamera2(Thing):
         one. This uses the camera's "tuning" file to correct the preview and
         the processed images. It should not affect raw images.
         """
-        self.set_static_green_equalisation()
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
@@ -935,11 +934,13 @@ class StreamingPiCamera2(Thing):
 
         * `flat_lens_shading` to disable flat-field
         * `auto_expose_from_minimum`
-        * `calibrate_white_balance`
+        * `set_static_green_equalisation` to set geq offset to max
         * `calibrate_lens_shading`
+        * `calibrate_white_balance`
         """
         self.flat_lens_shading()
         self.auto_expose_from_minimum()
+        self.set_static_green_equalisation()
         self.calibrate_lens_shading()
         self.calibrate_white_balance()
 
