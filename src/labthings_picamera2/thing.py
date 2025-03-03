@@ -868,6 +868,7 @@ class StreamingPiCamera2(Thing):
         one. This uses the camera's "tuning" file to correct the preview and
         the processed images. It should not affect raw images.
         """
+        self.set_static_green_equalisation()
         with self.picamera(pause_stream=True) as cam:
             L, Cr, Cb = recalibrate_utils.lst_from_camera(cam)
             recalibrate_utils.set_static_lst(self.tuning, L, Cr, Cb)
