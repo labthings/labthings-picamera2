@@ -934,11 +934,13 @@ class StreamingPiCamera2(Thing):
 
         * `flat_lens_shading` to disable flat-field
         * `auto_expose_from_minimum`
-        * `calibrate_white_balance`
+        * `set_static_green_equalisation` to set geq offset to max
         * `calibrate_lens_shading`
+        * `calibrate_white_balance`
         """
         self.flat_lens_shading()
         self.auto_expose_from_minimum()
+        self.set_static_green_equalisation()
         self.calibrate_lens_shading()
         self.calibrate_white_balance()
 
