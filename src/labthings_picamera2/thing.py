@@ -698,6 +698,7 @@ class StreamingPiCamera2(Thing):
         self,
         metadata_getter: GetThingStates,
         resolution: Literal["lores", "main", "full"] = "main",
+        quality: int = 95,
     ) -> JPEGBlob:
         """Acquire one image from the camera as a JPEG
 
@@ -722,6 +723,7 @@ class StreamingPiCamera2(Thing):
         # to reconfigure for these
         if resolution in ("lores", "main") and config[resolution]:
             with self.picamera() as cam:
+                cam.options['quality'] = quality
                 cam.capture_file(path, name=resolution, format="jpeg")
         else:
             if resolution != "full":
@@ -732,6 +734,7 @@ class StreamingPiCamera2(Thing):
                 logging.info("Reconfiguring camera for full resolution capture")
                 cam.configure(cam.create_still_configuration())
                 cam.start()
+                cam.options['quality'] = quality
                 logging.info("capturing")
                 cam.capture_file(path, name="main", format="jpeg")
                 logging.info("done")
