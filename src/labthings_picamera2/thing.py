@@ -527,16 +527,20 @@ class StreamingPiCamera2(Thing):
 
     @thing_action
     def capture_array(
-        self, stream_name: Literal["main", "lores", "raw"] = "main"
+        self,
+        stream_name: Literal["main", "lores", "raw"] = "main",
+        wait: Optional[float] = None,
     ) -> ArrayModel:
         """Acquire one image from the camera and return as an array
 
         This function will produce a nested list containing an uncompressed RGB image.
         It's likely to be highly inefficient - raw and/or uncompressed captures using
         binary image formats will be added in due course.
+
+        wait: float to pass to picamera as a timeout, raising an error if it is exceeded (seconds)
         """
         with self.picamera() as cam:
-            return cam.capture_array(stream_name)
+            return cam.capture_array(stream_name, wait = wait)
 
     @thing_action
     def capture_raw(
