@@ -528,7 +528,7 @@ class StreamingPiCamera2(Thing):
     @thing_action
     def capture_array(
         self,
-        stream_name: Literal["main", "lores", "raw"] = "main",
+        stream_name: Literal["main", "lores", "raw", "full"] = "main",
         wait: Optional[float] = None,
     ) -> ArrayModel:
         """Acquire one image from the camera and return as an array
@@ -537,9 +537,13 @@ class StreamingPiCamera2(Thing):
         It's likely to be highly inefficient - raw and/or uncompressed captures using
         binary image formats will be added in due course.
 
-        stream_name: (Optional) The PiCamera2 stream to use, should be one of ["main", "lores", "raw"]. Default = "main"
+        stream_name: (Optional) The PiCamera2 stream to use, should be one of ["main", "lores", "raw", "full"]. Default = "main"
         wait: (Optional, float) Set a timeout in seconds. A TimeoutError is raised if this time is exceeded during capture. Default = None
         """
+        if stream_name == "full":
+            with self.picamera(pause_stream=True) as picam2:
+                capture_config = picam2.create_still_configuration()
+                return picam2.switch_mode_and_capture_array(capture_config)
         with self.picamera() as cam:
             return cam.capture_array(stream_name, wait = wait)
 
@@ -773,15 +777,6 @@ class StreamingPiCamera2(Thing):
             f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame"
         )
         return JPEGBlob.from_bytes(frame)
-
-    @thing_action
-    def capture_highres_array(
-        self,
-        ):
-        with self.picamera(pause_stream=True) as picam2:
-            capture_config = picam2.create_still_configuration()
-            array = picam2.switch_mode_and_capture_array(capture_config)
-            return array
 
     @thing_action
     def grab_jpeg_size(
