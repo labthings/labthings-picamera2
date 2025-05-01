@@ -737,8 +737,9 @@ class StreamingPiCamera2(Thing):
                 logging.info("Reconfiguring camera for full resolution capture")
                 cam.configure(cam.create_still_configuration())
                 cam.start()
+                cam.options["quality"] = 95
                 logging.info("capturing")
-                cam.capture_file(path, name="main", format="jpeg")
+                cam.capture_file(path, name="main", format="jpeg", wait=5)
                 logging.info("done")
         # After the file is written, add metadata about the current Things
         exif_dict = piexif.load(path)
@@ -772,6 +773,15 @@ class StreamingPiCamera2(Thing):
             f"StreamingPiCamera2.grab_jpeg(stream_name={stream_name}) got frame"
         )
         return JPEGBlob.from_bytes(frame)
+
+    @thing_action
+    def capture_highres_array(
+        self,
+        ):
+        with self.picamera(pause_stream=True) as picam2:
+            capture_config = picam2.create_still_configuration()
+            array = picam2.switch_mode_and_capture_array(capture_config)
+            return array
 
     @thing_action
     def grab_jpeg_size(
