@@ -545,7 +545,7 @@ class StreamingPiCamera2(Thing):
                 capture_config = picam2.create_still_configuration()
                 return picam2.switch_mode_and_capture_array(capture_config, wait=wait)
         with self.picamera() as cam:
-            return cam.capture_array(stream_name, wait = wait)
+            return cam.capture_array(stream_name, wait=wait)
 
     @thing_action
     def capture_raw(
