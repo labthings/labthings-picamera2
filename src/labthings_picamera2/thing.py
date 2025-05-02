@@ -543,7 +543,7 @@ class StreamingPiCamera2(Thing):
         if stream_name == "full":
             with self.picamera(pause_stream=True) as picam2:
                 capture_config = picam2.create_still_configuration()
-                return picam2.switch_mode_and_capture_array(capture_config)
+                return picam2.switch_mode_and_capture_array(capture_config, wait=wait)
         with self.picamera() as cam:
             return cam.capture_array(stream_name, wait = wait)
 
