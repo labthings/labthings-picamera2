@@ -705,6 +705,13 @@ class StreamingPiCamera2(Thing):
             return cam.camera_configuration()
 
     @thing_action
+    def highres_mode_and_capture_array(self):
+        with self.picamera(pause_stream=True) as cam:
+            cam.configure(cam.create_still_configuration())
+            cam.start()
+            return cam.capture_array("main")
+
+    @thing_action
     def capture_jpeg(
         self,
         metadata_getter: GetThingStates,
