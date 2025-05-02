@@ -8,7 +8,6 @@ import os
 import tempfile
 import time
 from tempfile import TemporaryDirectory
-import uuid
 
 from pydantic import BaseModel, BeforeValidator, RootModel
 
@@ -529,7 +528,7 @@ class StreamingPiCamera2(Thing):
     def capture_array(
         self,
         stream_name: Literal["main", "lores", "raw"] = "main",
-        wait: Optional[float] = None,
+        wait: Optional[float] = 0.9,
     ) -> ArrayModel:
         """Acquire one image from the camera and return as an array
 
@@ -538,7 +537,9 @@ class StreamingPiCamera2(Thing):
         binary image formats will be added in due course.
 
         stream_name: (Optional) The PiCamera2 stream to use, should be one of ["main", "lores", "raw"]. Default = "main"
-        wait: (Optional, float) Set a timeout in seconds. A TimeoutError is raised if this time is exceeded during capture. Default = None
+        wait: (Optional, float) Set a timeout in seconds.
+        A TimeoutError is raised if this time is exceeded during capture.
+        Default = 0.9s, lower than the 1s timeout default in picamera yaml settings
         """
         with self.picamera() as cam:
             return cam.capture_array(stream_name, wait = wait)
@@ -549,19 +550,24 @@ class StreamingPiCamera2(Thing):
         states_getter: GetThingStates,
         get_states: bool=True,
         get_processing_inputs: bool=True,
+        wait: Optional[float] = 0.9,
     ) -> RawImageModel:
         """Capture a raw image
         
         This function is intended to be as fast as possible, and will return
         as soon as an image has been captured. The output format is not intended
         to be useful, except as input to `raw_to_png`. 
-        
+
+        wait: (Optional, float) Set a timeout in seconds.
+        A TimeoutError is raised if this time is exceeded during capture.
+        Default = 0.9s, lower than the 1s timeout default in picamera yaml settings
+
         When used via the HTTP interface, this function returns the data as a
         `Blob` object, meaning it can be passed to another action without
         transferring it over the network.
         """
         with self.picamera() as cam:
-            (buffer, ), parameters = cam.capture_buffers(["raw"])
+            (buffer, ), parameters = cam.capture_buffers(["raw"], wait=wait)
             configuration = cam.camera_configuration()
         return RawImageModel(
             image_data = RawBlob.from_bytes(buffer.tobytes()),
@@ -703,6 +709,7 @@ class StreamingPiCamera2(Thing):
         self,
         metadata_getter: GetThingStates,
         resolution: Literal["lores", "main", "full"] = "main",
+        wait: Optional[float] = 0.9,
     ) -> JPEGBlob:
         """Acquire one image from the camera as a JPEG
 
@@ -716,6 +723,10 @@ class StreamingPiCamera2(Thing):
         MJPEG stream and reconfigure the camera to capture a full
         resolution image.
 
+        wait: (Optional, float) Set a timeout in seconds.
+        A TimeoutError is raised if this time is exceeded during capture.
+        Default = 0.9s, lower than the 1s timeout default in picamera yaml settings
+
         Note that this always uses the image processing pipeline - to
         bypass this, you must use a raw capture.
         """
@@ -727,7 +738,7 @@ class StreamingPiCamera2(Thing):
         # to reconfigure for these
         if resolution in ("lores", "main") and config[resolution]:
             with self.picamera() as cam:
-                cam.capture_file(path, name=resolution, format="jpeg")
+                cam.capture_file(path, name=resolution, format="jpeg", wait=wait)
         else:
             if resolution != "full":
                 logging.warning(
@@ -738,7 +749,7 @@ class StreamingPiCamera2(Thing):
                 cam.configure(cam.create_still_configuration())
                 cam.start()
                 logging.info("capturing")
-                cam.capture_file(path, name="main", format="jpeg")
+                cam.capture_file(path, name="main", format="jpeg", wait=wait)
                 logging.info("done")
         # After the file is written, add metadata about the current Things
         exif_dict = piexif.load(path)
