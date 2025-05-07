@@ -448,7 +448,7 @@ class StreamingPiCamera2(Thing):
         del self._picamera
 
     @thing_action
-    def start_streaming(self) -> None:
+    def start_streaming(self, main_resolution: tuple[int, int] = (832, 624)) -> None:
         """
         Start the MJPEG stream
 
@@ -463,67 +463,21 @@ class StreamingPiCamera2(Thing):
                     picam.stop()
                     picam.stop_encoder()  # make sure there are no other encoders going
                 stream_config = picam.create_video_configuration(
-                    main={"size": (832, 624)},
+                    main={"size": main_resolution},
                     lores={"size": (320, 240), "format": "YUV420"},
                     sensor=self.thing_settings.get("sensor_mode", None),
                     controls=self.persistent_controls,
                 )
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
+                stream_name='lores' if main_resolution != (832, 624) else 'main'
                 picam.start_recording(
                     MJPEGEncoder(self.mjpeg_bitrate),
                     PicameraStreamOutput(
                         self.mjpeg_stream,
                         get_blocking_portal(self),
                     ),
-                )
-                picam.start_encoder(
-                    MJPEGEncoder(100000000),
-                    PicameraStreamOutput(
-                        self.lores_mjpeg_stream,
-                        get_blocking_portal(self),
-                    ),
-                    name="lores",
-                )
-            except Exception as e:
-                logging.exception("Error while starting preview: {e}")
-                logging.exception(e)
-            else:
-                self.stream_active = True
-                logging.debug(
-                    "Started MJPEG stream at %s on port %s", self.stream_resolution, 1
-                )
-
-    @thing_action
-    def start_highres_streaming(self) -> None:
-        """
-        Start the MJPEG stream
-
-        Sets the camera resolution to the video/stream resolution, and starts recording
-        if the stream should be active.
-        """
-        with self.picamera() as picam:
-            # TODO: Filip: can we use the lores output to keep preview stream going
-            # while recording? According to picamera2 docs 4.2.1.6 this should work
-            try:
-                if picam.started:
-                    picam.stop()
-                    picam.stop_encoder()  # make sure there are no other encoders going
-                stream_config = picam.create_video_configuration(
-                    main={"size": (3280, 2464)},
-                    lores={"size": (320, 240), "format": "YUV420"},
-                    sensor=self.thing_settings.get("sensor_mode", None),
-                    controls=self.persistent_controls,
-                )
-                picam.configure(stream_config)
-                logging.info("Starting picamera MJPEG stream...")
-                picam.start_recording(
-                    MJPEGEncoder(self.mjpeg_bitrate),
-                    PicameraStreamOutput(
-                        self.mjpeg_stream,
-                        get_blocking_portal(self),
-                    ),
-                    name="lores",
+                    name=stream_name,
                 )
                 picam.start_encoder(
                     MJPEGEncoder(100000000),
