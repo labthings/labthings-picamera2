@@ -448,7 +448,7 @@ class StreamingPiCamera2(Thing):
         del self._picamera
 
     @thing_action
-    def start_streaming(self, main_resolution: tuple[int, int] = (832, 624)) -> None:
+    def start_streaming(self, main_resolution: tuple[int, int] = (820, 616)) -> None:
         """
         Start the MJPEG stream
 
@@ -470,7 +470,7 @@ class StreamingPiCamera2(Thing):
                 )
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
-                stream_name='lores' if main_resolution != (832, 624) else 'main'
+                stream_name='lores' if main_resolution != (820, 616) else 'main'
                 picam.start_recording(
                     MJPEGEncoder(self.mjpeg_bitrate),
                     PicameraStreamOutput(
