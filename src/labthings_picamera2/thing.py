@@ -452,8 +452,14 @@ class StreamingPiCamera2(Thing):
         """
         Start the MJPEG stream
 
-        Sets the camera resolution to the video/stream resolution, and starts recording
-        if the stream should be active.
+        Sets the camera resolutions based on input parameters, and sets the low-res resolution to (320, 240)
+        ((320, 240) is a standard from the Pi Camera manual)
+
+        Create two streams, `lores_mjpeg_stream` for autofocus at low-res resolution, and `mjpeg_stream` for preview.
+        This is the `main_resolution` if this is less than (1280, 960), or the low-res resolution if above.
+        This allows for high resolution capture without streaming high resolution video.
+
+        main_resolution: the resolution for the main configuration. Defaults to (820, 616), 1/4 sensor size
         """
         with self.picamera() as picam:
             # TODO: Filip: can we use the lores output to keep preview stream going
@@ -468,9 +474,11 @@ class StreamingPiCamera2(Thing):
                     sensor=self.thing_settings.get("sensor_mode", None),
                     controls=self.persistent_controls,
                 )
+                # Reducing buffer_count from video standard 6 to 4 to save memory
+                stream_config["buffer_count"] = 4
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
-                stream_name='lores' if main_resolution != (820, 616) else 'main'
+                stream_name='lores' if main_resolution[0] > 1280 else 'main'
                 picam.start_recording(
                     MJPEGEncoder(self.mjpeg_bitrate),
                     PicameraStreamOutput(
