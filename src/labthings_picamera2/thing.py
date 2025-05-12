@@ -575,6 +575,9 @@ class StreamingPiCamera2(Thing):
         A TimeoutError is raised if this time is exceeded during capture.
         Default = 0.9s, lower than the 1s timeout default in picamera yaml settings
         """
+
+        # This was slower than capture_image for our use case, but directly returning
+        # an image as an array is still a useful feature
         if stream_name == "full":
             with self.picamera(pause_stream=True) as picam2:
                 capture_config = picam2.create_still_configuration()
