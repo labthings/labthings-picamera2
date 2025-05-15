@@ -449,7 +449,9 @@ class StreamingPiCamera2(Thing):
         del self._picamera
 
     @thing_action
-    def start_streaming(self, main_resolution: tuple[int, int] = (820, 616)) -> None:
+    def start_streaming(
+        self, main_resolution: tuple[int, int] = (820, 616), buffer_count: int = 6
+    ) -> None:
         """
         Start the MJPEG stream
 
@@ -465,6 +467,8 @@ class StreamingPiCamera2(Thing):
 
         main_resolution: the resolution for the main configuration. Defaults to
         (820, 616), 1/4 sensor size.
+        buffer_count: the number of frames to hold in the buffer. Higher uses more memory,
+        lower may cause dropped frames. Defaults to 6.
         """
         with self.picamera() as picam:
             # TODO: Filip: can we use the lores output to keep preview stream going
@@ -479,8 +483,8 @@ class StreamingPiCamera2(Thing):
                     sensor=self.thing_settings.get("sensor_mode", None),
                     controls=self.persistent_controls,
                 )
-                # Reducing buffer_count from video standard 6 to 4 to save memory
-                stream_config["buffer_count"] = 4
+                # Set buffer count - can't be negative
+                stream_config["buffer_count"] = buffer_count
                 picam.configure(stream_config)
                 logging.info("Starting picamera MJPEG stream...")
                 stream_name = "lores" if main_resolution[0] > 1280 else "main"
